@@ -37,7 +37,7 @@ sequenceDiagram
     AR->>BE: Turn Complete
     BE-->>LC: WebSocket Message (turn_complete)
     LC-->>CS: Resolve Promise
-    CS->>BE: chat_load (Refresh final state)
+    CS->>FE: chat_load (Refresh final state)
     FE-->>U: Show final message
 ```
 
@@ -45,8 +45,8 @@ sequenceDiagram
 
 ### 1. Frontend Interaction
 
-- **Component**: `client/src/components/ai/AIPanel/AIPanel.vue`
-- **Composable**: `client/src/components/ai/AIPanel/composables/useChatInput.ts`
+- **Component**: `client/src/apps/CodeEditor/components/ai/AIPanel/AIPanel.vue`
+- **Composable**: `client/src/apps/CodeEditor/components/ai/AIPanel/composables/useChatInput.ts`
 - **Action**: When the user clicks send, `sendMessage()` is triggered. It gathers context (active file, selection) using the `ContextManager` and calls the `ChatStore`.
 
 ### 2. Communication Layer
@@ -88,7 +88,7 @@ sequenceDiagram
 
 ### 7. Event Dispatching
 
-- **Callback**: `on_event` in `server/server.py`.
+- **Callback**: `on_event` in `server/apps/code_editor/agent/agent.py`.
 - **Events**:
   - `thinking_start` / `thinking_chunk` / `thinking_end`
   - `content_chunk`
