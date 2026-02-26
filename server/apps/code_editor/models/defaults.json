@@ -121,6 +121,28 @@
     }
   },
   {
+    "id": "gemini-2.5-flash",
+    "provider": "google",
+    "family": "gemini",
+    "name": "Gemini 2.5 Flash",
+    "version": "2.5-flash",
+    "contextWindow": 1000000,
+    "capabilities": {
+      "jsonMode": true,
+      "functionCalling": true,
+      "streaming": true,
+      "vision": true
+    },
+    "connection": {
+      "baseUrl": "https://generativelanguage.googleapis.com",
+      "path": "/v1beta/models/gemini-2.5-flash:generateContent",
+      "auth": {
+        "type": "header",
+        "headerName": "x-goog-api-key"
+      }
+    }
+  },
+  {
     "id": "deepseek-v3",
     "provider": "openai_compatible",
     "family": "deepseek",

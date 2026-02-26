@@ -7,10 +7,12 @@ Handles provider aliases and runtime auto-prefixing.
 
 from typing import Tuple
 from urllib.parse import urlparse
+import re
 
 
 # Provider ID -> LiteLLM route prefix
 # See https://docs.litellm.ai/docs/providers
+# For Google AI Studio (GEMINI_API_KEY), LiteLLM route is gemini/ not google/
 PROVIDER_TO_PREFIX: dict[str, str] = {
     "openai": "openai",
     "anthropic": "anthropic",
@@ -24,14 +26,28 @@ PROVIDER_TO_PREFIX: dict[str, str] = {
     "local_companion": "openai",  # Routes to vLLM, OpenAI-compatible
     "kimi": "openai",  # OpenAI-compatible (Moonshot)
     "moonshot": "openai",  # Alias for Kimi
-    "google": "google",
-    "gemini": "google",  # Google AI Studio
+    "google": "gemini",  # Google AI Studio: LiteLLM expects gemini/ prefix
+    "gemini": "gemini",  # Google AI Studio
     "vertex_ai": "vertex_ai",
     "deepseek": "deepseek",
     "groq": "groq",
     "mistral": "mistral",
     "xai": "xai",
 }
+
+
+def gemini_model_id_from_path(path: str) -> str | None:
+    """
+    Extract Gemini API model id from connection path (e.g. /v1beta/models/gemini-3-pro-preview:generateContent).
+    Returns None if path is empty or doesn't match. Used so LiteLLM gets the correct model name
+    and doesn't fall back to Vertex AI on 404.
+    """
+    if not path or not isinstance(path, str):
+        return None
+    path = path.strip()
+    # Match /v1beta/models/MODEL_ID:generateContent or /v1/models/MODEL_ID
+    m = re.match(r"/v1(?:beta)?/models/([^/:]+)(?::generateContent)?", path)
+    return m.group(1) if m else None
 
 
 def _is_already_prefixed(model_id: str) -> bool:
@@ -56,7 +72,7 @@ def _resolve_prefix_from_base_url(base_url: str) -> str | None:
         parsed = urlparse(base_url)
         host = (parsed.netloc or "").lower()
         if "generativelanguage.googleapis.com" in host:
-            return "google"
+            return "gemini"
         if "openrouter.ai" in host:
             return "openrouter"
     except Exception:
@@ -78,7 +94,7 @@ def normalize_model_name(
     - If model_id is already prefixed (e.g. openai/gpt-4), return as-is.
     - When using custom api_base (e.g. vLLM), return raw model_id (no prefix).
     - Else prefix with provider's LiteLLM prefix at runtime.
-    - For openai_compatible, may resolve prefix from base_url (e.g. Gemini -> google/).
+    - For openai_compatible, may resolve prefix from base_url (e.g. Gemini -> gemini/).
 
     Args:
         provider: Provider ID from model config
@@ -146,7 +162,16 @@ def normalize_model_name(
             # LiteLLM strips first "openai/" -> "openai/model-name" (what LM Studio expects)
             result = f"openai/openai/{base_model}"
             return result
-        
+
+        # Google/Gemini: LiteLLM expects gemini/ prefix for Google AI Studio (not google/)
+        if provider in ("google", "gemini"):
+            if "/" in model_id:
+                parts = model_id.split("/", 1)
+                base_model = parts[1] if len(parts) > 1 else model_id
+            else:
+                base_model = model_id
+            return f"gemini/{base_model}"
+
         # For other providers with custom api_base, strip prefix if present
         # (Some providers don't need prefix when using custom api_base)
         if "/" in model_id:
@@ -182,7 +207,7 @@ def normalize_model_name(
             if resolved:
                 return f"{resolved}/{model_id}"
         if family and family.lower() == "gemini":
-            return f"google/{model_id}"
+            return f"gemini/{model_id}"
         if family and family.lower() == "kimi":
             pass  # Keep openai/ with api_base
         prefix = PROVIDER_TO_PREFIX.get(provider, "openai")
@@ -272,7 +297,13 @@ def build_litellm_kwargs_from_connection(
     result: dict = {}
 
     api_base = get_api_base_for_provider(provider, connection, local_companion=local_companion)
-    if api_base:
+    # For Google AI Studio (gemini/), do not pass api_base so LiteLLM uses its native
+    # gemini/ route with api_key only. Passing api_base can trigger Vertex AI fallback
+    # on errors and cause Vertex_ai_betaException.
+    if api_base and not (
+        provider.strip().lower() in ("google", "gemini")
+        and "generativelanguage.googleapis.com" in (api_base or "")
+    ):
         result["api_base"] = api_base
 
     auth_type = (auth or {}).get("type", "none")

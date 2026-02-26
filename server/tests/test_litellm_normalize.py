@@ -24,10 +24,11 @@ class TestNormalizeModelName:
         assert normalize_model_name("lmstudio", "local-model") == "lm_studio/local-model"
 
     def test_google_provider(self):
-        assert normalize_model_name("google", "gemini-2.0-flash") == "google/gemini-2.0-flash"
+        # LiteLLM expects gemini/ prefix for Google AI Studio (GEMINI_API_KEY)
+        assert normalize_model_name("google", "gemini-2.0-flash") == "gemini/gemini-2.0-flash"
 
-    def test_gemini_provider_maps_to_google(self):
-        assert normalize_model_name("gemini", "gemini-2.0-flash") == "google/gemini-2.0-flash"
+    def test_gemini_provider(self):
+        assert normalize_model_name("gemini", "gemini-2.0-flash") == "gemini/gemini-2.0-flash"
 
     def test_kimi_provider(self):
         assert normalize_model_name("kimi", "kimi-k2") == "openai/kimi-k2"
@@ -35,7 +36,7 @@ class TestNormalizeModelName:
     def test_openai_compatible_with_gemini_family(self):
         assert (
             normalize_model_name("openai_compatible", "gemini-2.0", family="gemini")
-            == "google/gemini-2.0"
+            == "gemini/gemini-2.0"
         )
 
     def test_already_prefixed_passthrough(self):

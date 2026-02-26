@@ -7,7 +7,7 @@ Handles tools, thinking/reasoning, usage, and tool_calls from LiteLLM responses.
 
 import json
 import uuid
-from typing import AsyncGenerator, Dict, Any, Optional, Set
+from typing import AsyncGenerator, Dict, Any, List, Optional, Set
 
 import litellm
 
@@ -16,6 +16,7 @@ from .events import LLMEvent, LLMRequest, TokenUsage
 from .normalize import (
     normalize_model_name,
     build_litellm_kwargs_from_connection,
+    gemini_model_id_from_path,
 )
 
 
@@ -140,6 +141,29 @@ class LiteLLMProvider(LLMProvider):
             # Fail open to avoid accidental tool disablement.
             return True
 
+    @staticmethod
+    def _tools_for_gemini(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Ensure tool schemas are Gemini/Vertex compliant: array parameters must have "items".
+        Mutates and returns the same list (with nested dicts updated in place).
+        """
+        for tool in tools:
+            func = (tool or {}).get("function") if isinstance(tool, dict) else None
+            if not isinstance(func, dict):
+                continue
+            params = func.get("parameters")
+            if not isinstance(params, dict):
+                continue
+            props = params.get("properties")
+            if not isinstance(props, dict):
+                continue
+            for key, prop in list(props.items()):
+                if not isinstance(prop, dict) or prop.get("type") != "array":
+                    continue
+                if "items" not in prop:
+                    prop["items"] = {"type": "string"}
+        return tools
+
     def _extract_thinking_text_from_blocks(self, blocks: Any) -> str:
         """
         Extract reasoning text from thinking_blocks-like structures.
@@ -187,6 +211,13 @@ class LiteLLMProvider(LLMProvider):
         connection = request.connection or self.connection
         auth = request.auth or self.auth
 
+        # For Gemini, use model id from connection path when present so LiteLLM gets the
+        # correct API name (e.g. gemini-3-pro-preview) and doesn't 404 then fall back to Vertex.
+        if provider.strip().lower() in ("google", "gemini") and connection:
+            path_model = gemini_model_id_from_path((connection or {}).get("path") or "")
+            if path_model:
+                model_id = path_model
+
         # Build LiteLLM kwargs from connection/auth first to get api_base
         conn_kwargs = build_litellm_kwargs_from_connection(
             provider,
@@ -200,7 +231,7 @@ class LiteLLMProvider(LLMProvider):
             provider,
             model_id,
             family=request.family,
-            base_url=connection.get("baseUrl"),
+            base_url=connection.get("baseUrl") if connection else None,
             api_base=conn_kwargs.get("api_base"),
         )
 
@@ -243,10 +274,18 @@ class LiteLLMProvider(LLMProvider):
         provider_lower = (provider or "").lower()
         supports_fn_calling = self._supports_function_calling(litellm_model)
         force_tools_for_vllm = provider_lower in {"vllm", "local_companion"}
+        force_tools_for_lmstudio = provider_lower in {"lmstudio", "lm_studio"}
 
-        if request.tools and (force_tools_for_vllm or (supports_tools_param and supports_fn_calling)):
-            litellm_kwargs["tools"] = request.tools
-            if force_tools_for_vllm or supports_tool_choice_param:
+        if request.tools and (
+            force_tools_for_vllm
+            or force_tools_for_lmstudio
+            or (supports_tools_param and supports_fn_calling)
+        ):
+            tools = list(request.tools)
+            if litellm_model.startswith("gemini/"):
+                tools = self._tools_for_gemini(tools)
+            litellm_kwargs["tools"] = tools
+            if force_tools_for_vllm or force_tools_for_lmstudio or supports_tool_choice_param:
                 litellm_kwargs["tool_choice"] = request.tool_choice
 
         if request.extra_payload:
