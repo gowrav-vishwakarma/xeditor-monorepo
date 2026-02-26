@@ -125,6 +125,11 @@ def strip_thinking_tags(content: str) -> str:
                 # No closing tag - strip from opening tag to end
                 result = result[:open_match.start()]
     
+    # Remove standalone closing tags (can appear when model outputs incomplete thinking blocks)
+    # This handles cases where we get </think> or </thought> without opening tags
+    result = re.sub(r'</think>', '', result, flags=re.IGNORECASE)
+    result = re.sub(r'</thought>', '', result, flags=re.IGNORECASE)
+    
     # Don't strip whitespace - this preserves spaces in markdown (e.g., "## What" not "##What")
     # The original .strip() was removing spaces at chunk boundaries during streaming
     return result

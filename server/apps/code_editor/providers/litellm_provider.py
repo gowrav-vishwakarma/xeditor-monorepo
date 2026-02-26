@@ -7,6 +7,7 @@ Handles tools, thinking/reasoning, usage, and tool_calls from LiteLLM responses.
 
 import json
 import uuid
+import re
 from typing import AsyncGenerator, Dict, Any, List, Optional, Set
 
 import litellm
@@ -274,18 +275,19 @@ class LiteLLMProvider(LLMProvider):
         provider_lower = (provider or "").lower()
         supports_fn_calling = self._supports_function_calling(litellm_model)
         force_tools_for_vllm = provider_lower in {"vllm", "local_companion"}
-        force_tools_for_lmstudio = provider_lower in {"lmstudio", "lm_studio"}
+        # LM Studio: Use prompt-based tool calling instead of native (LM Studio's native tool calling is malformed)
+        # Tools will be added to the prompt via {{tools}} template variable, and parsed from text response
+        force_tools_for_lmstudio = False  # Disabled - use prompt-based instead
 
         if request.tools and (
             force_tools_for_vllm
-            or force_tools_for_lmstudio
             or (supports_tools_param and supports_fn_calling)
         ):
             tools = list(request.tools)
             if litellm_model.startswith("gemini/"):
                 tools = self._tools_for_gemini(tools)
             litellm_kwargs["tools"] = tools
-            if force_tools_for_vllm or force_tools_for_lmstudio or supports_tool_choice_param:
+            if force_tools_for_vllm or supports_tool_choice_param:
                 litellm_kwargs["tool_choice"] = request.tool_choice
 
         if request.extra_payload:
@@ -356,6 +358,7 @@ class LiteLLMProvider(LLMProvider):
 
                 # Tool calls (streaming) - accumulate by index
                 tcs = getattr(delta, "tool_calls", None) or []
+                
                 for tc in tcs:
                     tc_dict = tc if isinstance(tc, dict) else None
                     if tc_dict is None and hasattr(tc, "__dict__"):
@@ -364,6 +367,7 @@ class LiteLLMProvider(LLMProvider):
                             "id": getattr(tc, "id", None),
                             "function": getattr(tc, "function", None),
                         }
+                    
                     if not tc_dict:
                         continue
                     idx = tc_dict.get("index")
@@ -371,7 +375,61 @@ class LiteLLMProvider(LLMProvider):
                         continue
                     fn = tc_dict.get("function")
                     if fn is not None and not isinstance(fn, dict) and hasattr(fn, "name"):
-                        fn = {"name": getattr(fn, "name", None), "arguments": getattr(fn, "arguments", None) or ""}
+                        fn_name_raw = getattr(fn, "name", None)
+                        fn_args_raw = getattr(fn, "arguments", None) or ""
+                        
+                        # LM Studio workaround: name field contains malformed JSON with both name and arguments
+                        # Format: "function_name\", \"arguments\": {...}}\n</tool_call"
+                        if fn_name_raw and isinstance(fn_name_raw, str) and not fn_args_raw:
+                            # Check if name contains escaped JSON structure (LM Studio malformed format)
+                            # The actual string has: "read_file\", \"arguments\": {...}
+                            check1 = '", "arguments":' in fn_name_raw
+                            check2 = '\\", \\"arguments\\":' in fn_name_raw
+                            check3 = '\\"arguments\\":' in fn_name_raw
+                            check4 = '"arguments":' in fn_name_raw
+                            
+                            if check1 or check2 or check3 or check4:
+                                try:
+                                    # Try to extract function name and arguments from malformed name field
+                                    # Pattern: "read_file\", \"arguments\": {\"target_file\": \"...\"}}\n</tool_call"
+                                    # Actual string: "read_file\", \"arguments\": {\"target_file\": \"frontend/README.md\"}}\n</tool_call"
+                                    # Match: "function_name\", \"arguments\": {...}
+                                    # The string has literal backslash-quote sequences, so we need to match \\"
+                                    # Try multiple patterns to handle different escaping
+                                    match = None
+                                    patterns = [
+                                        r'"([^"]+)"\\",\s*\\"arguments\\":\s*(\{.*?\})',  # Exact match: "name\", \"arguments\": {...}
+                                        r'"([^"]+)"\\?",\s*\\?"arguments\\?":\s*(\{.*?\})',  # Optional escapes
+                                        r'([^"]+)\\",\s*\\"arguments\\":\s*(\{.*?\})',  # No leading quote
+                                    ]
+                                    for pattern in patterns:
+                                        match = re.search(pattern, fn_name_raw)
+                                        if match:
+                                            break
+                                    
+                                    if match:
+                                        actual_name = match.group(1)
+                                        args_json_str = match.group(2)
+                                        # Try to parse the arguments JSON
+                                        try:
+                                            args_parsed = json.loads(args_json_str)
+                                            fn_name_raw = actual_name
+                                            fn_args_raw = json.dumps(args_parsed)
+                                        except json.JSONDecodeError:
+                                            # If JSON parsing fails, try to fix escaped quotes
+                                            args_json_str_fixed = args_json_str.replace('\\"', '"').replace('\\n', '')
+                                            try:
+                                                args_parsed = json.loads(args_json_str_fixed)
+                                                fn_name_raw = actual_name
+                                                fn_args_raw = json.dumps(args_parsed)
+                                            except json.JSONDecodeError:
+                                                pass  # Fall back to original behavior
+                                except Exception:
+                                    pass  # Fall back to original behavior
+                        
+                        fn = {"name": fn_name_raw, "arguments": fn_args_raw}
+                    elif isinstance(fn, dict):
+                        pass  # Already a dict, use as-is
                     fn = fn or {}
                     if idx not in tool_calls_acc:
                         tool_calls_acc[idx] = {"name": "", "arguments": "", "id": tc_dict.get("id", ""), "emitted": False}
@@ -390,6 +448,7 @@ class LiteLLMProvider(LLMProvider):
                         try:
                             args = json.loads(args_str)
                             tool_call_id = acc.get("id") or f"call_{idx}_{uuid.uuid4().hex[:8]}"
+                            
                             yield LLMEvent(
                                 type="tool_call",
                                 tool_call={"tool": name, "args": args, "id": tool_call_id},
