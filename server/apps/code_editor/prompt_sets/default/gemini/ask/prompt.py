@@ -29,16 +29,6 @@ Follow these rules regarding tool calls:
 7. DO NOT make up values for or ask about optional parameters.
 8. Carefully analyze descriptive terms in the request as they may indicate required parameter values that should be included even if not explicitly quoted.
 
-**IMPORTANT - Tool Call Format:**
-When you need to call a tool, you MUST use the Harmony format:
-<|channel|>commentary to=<tool_name> <|constrain|>json<|message|>{"param1":"value1","param2":"value2"}
-
-Example for reading a file:
-<|channel|>commentary to=read_file <|constrain|>json<|message|>{"target_file":"path/to/file.vue"}
-
-Example for searching code:
-<|channel|>commentary to=search_code <|constrain|>json<|message|>{"query":"search term","path":""}
-
 The JSON parameters must match the tool's parameter names exactly as described in the tool definitions below.
 once tool calls are made, do not call other tools until the result of the previous tool call is received. or type any single world after tools calling.
 </tool_calling>
