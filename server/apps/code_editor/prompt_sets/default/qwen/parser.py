@@ -378,7 +378,7 @@ class QwenParser(ResponseParser):
         
         result = ParsedResponse(
             thinking=thinking,
-            tool_call=None,
+            tool_call=tool_call,  # Use extracted tool_call (or None if not found)
             patches=patches or None,
             final_text=final_text,
         )
@@ -390,8 +390,10 @@ class QwenParser(ResponseParser):
         Strip internal tags that shouldn't be displayed to users.
         Only removes <think> tags - these are internal and shouldn't be shown.
         """
-        # Only remove thinking tags (internal, shouldn't be displayed)
+        # Remove complete <think>...</think> blocks
         result = self.THINK_PATTERN.sub('', content)
+        # Also remove standalone closing tags (can appear when model outputs incomplete thinking blocks)
+        result = re.sub(r'</think>', '', result, flags=re.IGNORECASE)
         return result
     
     def serialize_tool_call(

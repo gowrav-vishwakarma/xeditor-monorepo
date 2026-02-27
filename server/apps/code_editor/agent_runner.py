@@ -774,16 +774,15 @@ class AgentRunner:
                         # Stream safe content BEFORE checking for tool calls
                         # This prevents Harmony tokens from leaking into the UI
                         if safe_content and not is_tool_pending:
-                            # Calculate new content that hasn't been streamed yet
-                            if len(safe_content) > len(streamed_safe_content):
-                                new_safe_content = safe_content[len(streamed_safe_content):]
+                            # Strip thinking tags from full safe_content before computing delta.
+                            # Must strip the full content, not the delta, because <think> can span chunks.
+                            # Provider may emit structured thinking (reasoning_content), or parser
+                            # may extract from <think> tags (LM Studio, etc.). In both cases we
+                            # must not show <think> in the main content area.
+                            stripped_safe = strip_thinking_tags(safe_content)
+                            if len(stripped_safe) > len(streamed_safe_content):
+                                new_safe_content = stripped_safe[len(streamed_safe_content):]
                                 if new_safe_content:
-                                    # Guard: strip thinking tags if provider already emitted structured thinking
-                                    if received_thinking_from_provider:
-                                        new_safe_content = strip_thinking_tags(new_safe_content)
-                                        if not new_safe_content:
-                                            # Skip this iteration if content was only thinking
-                                            continue
                                     
                                     # Create or append to assistant_message trace event
                                     if current_assistant_message_id is None:
@@ -804,8 +803,8 @@ class AgentRunner:
                                                 break
                                     
                                     await emit_event("content_chunk", {"content": new_safe_content})
-                                    streamed_safe_content = safe_content
-                                    final_text = safe_content
+                                    streamed_safe_content = stripped_safe
+                                    final_text = stripped_safe
 
                         # Parse incrementally for tool calls and patches
                         parsed = parser.parse(content_to_parse)
@@ -861,10 +860,9 @@ class AgentRunner:
                             if accumulated_content:
                                 content_to_parse = strip_thinking_tags(accumulated_content) if received_thinking_from_provider else accumulated_content
                                 safe_content, _ = parser.get_streamable_content(content_to_parse)
-                                if safe_content and len(safe_content) > len(streamed_safe_content):
-                                    remaining_content = safe_content[len(streamed_safe_content):]
-                                    if received_thinking_from_provider:
-                                        remaining_content = strip_thinking_tags(remaining_content)
+                                stripped_safe = strip_thinking_tags(safe_content)
+                                if stripped_safe and len(stripped_safe) > len(streamed_safe_content):
+                                    remaining_content = stripped_safe[len(streamed_safe_content):]
                                     if remaining_content:
                                         if current_assistant_message_id is None:
                                             current_assistant_message_id = str(uuid.uuid4())
@@ -882,8 +880,8 @@ class AgentRunner:
                                                     te["content"] = (te.get("content", "") or "") + remaining_content
                                                     break
                                         await emit_event("content_chunk", {"content": remaining_content})
-                                        streamed_safe_content = safe_content
-                                        final_text = safe_content
+                                        streamed_safe_content = stripped_safe
+                                        final_text = stripped_safe
 
                             if thinking_started:
                                 await emit_event("thinking_end", {})
@@ -925,10 +923,8 @@ class AgentRunner:
                             # This ensures Harmony tokens never leak into the UI
                             if last_parsed.final_text:
                                 # parsed.final_text already has tool calls removed by parser._remove_complete_tool_calls()
-                                final_text = last_parsed.final_text
-                                # Guard: strip thinking tags if provider already emitted structured thinking
-                                if received_thinking_from_provider:
-                                    final_text = strip_thinking_tags(final_text)
+                                # Always strip thinking tags (parser strips, but defensive for edge cases)
+                                final_text = strip_thinking_tags(last_parsed.final_text)
                                 
                                 # Stream any remaining content that wasn't streamed yet
                                 # Use final_text (which is clean) instead of safe_content
