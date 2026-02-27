@@ -48,16 +48,6 @@ You have tools at your disposal to gather information and create plans. Follow t
 3. **CRITICAL: Call only ONE tool at a time.** After calling a tool, wait for the result before calling another tool. Do not make multiple tool calls in a single response.
 4. Check that all required parameters for each tool call are provided or can reasonably be inferred from context.
 5. If the user provides a specific value for a parameter (for example provided in quotes), make sure to use that value EXACTLY.
-
-**IMPORTANT - Tool Call Format:**
-When you need to call a tool, you MUST use the Harmony format:
-<|channel|>commentary to=<tool_name> <|constrain|>json<|message|>{"param1":"value1","param2":"value2"}
-
-Example for reading a file:
-<|channel|>commentary to=read_file <|constrain|>json<|message|>{"target_file":"path/to/file.vue"}
-
-Example for creating a plan:
-<|channel|>commentary to=create_plan <|constrain|>json<|message|>{"name":"Auth Feature","overview":"Add user authentication","plan":"# Auth Feature\\n\\n## Overview\\n...","todos":[{"id":"step1","content":"Create auth service"}]}
 </tool_calling>
 
 <codebase_exploration>

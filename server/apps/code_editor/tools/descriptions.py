@@ -459,11 +459,13 @@ def convert_tools_to_openai_format(
             prop: Dict[str, Any] = {
                 "type": ptype,
                 "description": param_info.get("description", ""),
+                "items": param_info.get("items", {}) if ptype == "array" else None,
             }
             # Gemini/Vertex require array params to have "items"; copy through for API compliance
             if ptype == "array" and "items" in param_info:
                 prop["items"] = param_info["items"]
             properties[param_name] = prop
+
             if param_info.get("required", False):
                 required.append(param_name)
 

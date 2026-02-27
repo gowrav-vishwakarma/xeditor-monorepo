@@ -118,6 +118,17 @@ def normalize_model_name(
             return model_id
         return f"openrouter/{model_id}"
 
+    if provider in ("google", "gemini"):
+        # Extract base model name (remove any existing prefix)
+        if "/" in model_id:
+            parts = model_id.split("/", 1)
+            base_model = parts[1] if len(parts) > 1 else model_id
+        else:
+            base_model = model_id
+        # Use gemini/ prefix for Gemini models (Google AI Studio)
+        result = f"gemini/{base_model}"
+        return result
+
     # When using custom api_base (e.g. vLLM, OpenAI-compatible endpoints),
     # LiteLLM strips the first provider prefix from model names.
     # For vLLM, we need to use double prefix trick: "openai/openai/model-name"
@@ -258,9 +269,6 @@ def get_api_base_for_provider(
     base_url = (connection or {}).get("baseUrl", "")
 
     if not base_url:
-        # Default api_base for known providers when not configured
-        if provider in ("google", "gemini"):
-            return "https://generativelanguage.googleapis.com"
         return None
 
     base = base_url.rstrip("/")
@@ -277,7 +285,11 @@ def get_api_base_for_provider(
     if provider in ("lmstudio", "lm_studio", "sglang", "openai_compatible"):
         if not base.endswith("/v1"):
             base = f"{base}/v1"
-    
+
+    # liteLLM handles path construction automatically for gemini
+    if provider in ("google", "gemini"):
+        return None
+
     # LiteLLM expects base URL (e.g. https://api.openai.com or https://host/v1)
     return base if base else None
 
