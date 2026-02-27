@@ -88,13 +88,7 @@ TOOL_DESCRIPTIONS: Dict[str, Dict[str, Any]] = {
             },
             "ignore_globs": {
                 "type": "array",
-<<<<<<< HEAD
-                "items": {
-                    "type": "string"
-                },
-=======
                 "items": {"type": "string"},
->>>>>>> 9022ec4f127820f48eb3a5ac864a9930aea5796b
                 "required": False,
                 "description": "Array of glob patterns to ignore. All patterns match anywhere in the target directory.",
             },
@@ -195,13 +189,7 @@ TOOL_DESCRIPTIONS: Dict[str, Dict[str, Any]] = {
             },
             "todos": {
                 "type": "array",
-<<<<<<< HEAD
-                "items": {
-                    "type": "object"
-                },
-=======
                 "items": {"type": "object"},
->>>>>>> 9022ec4f127820f48eb3a5ac864a9930aea5796b
                 "required": True,
                 "description": "Array of todo items to write to the plan file. Each todo item must have: id (required, unique identifier), content (optional, description of task), status (required: pending, in_progress, completed, cancelled).",
             },
@@ -222,13 +210,7 @@ TOOL_DESCRIPTIONS: Dict[str, Dict[str, Any]] = {
             },
             "folder_ids": {
                 "type": "array",
-<<<<<<< HEAD
-                "items": {
-                    "type": "string"
-                },
-=======
                 "items": {"type": "string"},
->>>>>>> 9022ec4f127820f48eb3a5ac864a9930aea5796b
                 "required": False,
                 "description": "Optional list of folder IDs to limit the search scope to specific directories.",
             },
@@ -264,13 +246,7 @@ TOOL_DESCRIPTIONS: Dict[str, Dict[str, Any]] = {
             },
             "todos": {
                 "type": "array",
-<<<<<<< HEAD
-                "items": {
-                    "type": "object"
-                },
-=======
                 "items": {"type": "object"},
->>>>>>> 9022ec4f127820f48eb3a5ac864a9930aea5796b
                 "required": False,
                 "description": "Array of implementation todos. Each todo has: id (unique identifier), content (description of task).",
             },
@@ -286,13 +262,7 @@ TOOL_DESCRIPTIONS: Dict[str, Dict[str, Any]] = {
             },
             "questions": {
                 "type": "array",
-<<<<<<< HEAD
-                "items": {
-                    "type": "object"
-                },
-=======
                 "items": {"type": "object"},
->>>>>>> 9022ec4f127820f48eb3a5ac864a9930aea5796b
                 "required": True,
                 "description": "Array of questions to present to the user. Each question has: id (unique identifier), prompt (question text), options (array of {id, label} choices), allow_multiple (optional boolean, defaults to false).",
             },
@@ -491,20 +461,11 @@ def convert_tools_to_openai_format(
                 "description": param_info.get("description", ""),
                 "items": param_info.get("items", {}) if ptype == "array" else None,
             }
-<<<<<<< HEAD
-           #  for array paramters include the 'items' field in the schema.
-           #  for non-array types, we can omit it. This ensures compatibility with Gemini's requirements for function parameters.
-           #  compatible with other providers as well, since they can ignore the 'items' field when not needed.
-
-            if (ptype == "array"):
-                properties[param_name]['items'] = param_info.get("items", {})
-
-=======
             # Gemini/Vertex require array params to have "items"; copy through for API compliance
             if ptype == "array" and "items" in param_info:
                 prop["items"] = param_info["items"]
             properties[param_name] = prop
->>>>>>> 9022ec4f127820f48eb3a5ac864a9930aea5796b
+
             if param_info.get("required", False):
                 required.append(param_name)
 
