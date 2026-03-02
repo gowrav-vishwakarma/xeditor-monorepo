@@ -53,8 +53,22 @@ Example for searching code:
 </function>
 </tool_call>
 
+Example with context compression (replace previous tool result [tc1] with a summary):
+<tool_call>
+<function=read_file>
+<parameter=target_file>other.py</parameter>
+<parameter=_context_updates>[{"tc1":"irrelevant CSS file"}]</parameter>
+</function>
+</tool_call>
+
 The parameter names must match the tool's parameter names exactly as described in the tool definitions below. Parameter values can be strings, numbers, booleans (true/false), null, or JSON objects/arrays.
+
+**Context compression (_context_updates):** Each tool call result is labeled with an ID like [tc1], [tc2], etc. When a tool result is no longer useful or you only need a summary, add "_context_updates" as a parameter to ANY subsequent tool call. Pass an array of objects: [{"tc1":"summary"}]. Make this a regular habit on each tool call—summarize old results when they are no longer needed.
 </tool_calling>
+
+<context_usage>
+{% if context_usage.contextWindow %}CONTEXT: {{context_usage.usedPromptTokens}} / {{context_usage.contextWindow}} tokens ({{context_usage.fillPercent}}% used). On each tool call, summarize old tool results via _context_updates when they are no longer needed. When context usage is high (70%+), do this more aggressively.{% endif %}
+</context_usage>
 
 <search_and_reading>
 If you are unsure about the answer to the USER's question, you should gather more information using additional tool calls, asking clarifying questions, etc...

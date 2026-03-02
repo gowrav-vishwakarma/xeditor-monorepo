@@ -33,6 +33,17 @@ When you need to call a tool, you MUST use the following format:
 {"name": "<tool_name>", "parameters": {"param1": "value1", "param2": "value2"}}
 </function_call>
 
+Example with context compression (replace previous tool results with summaries):
+<function_call>
+{"name": "read_file", "parameters": {"target_file": "other.py", "_context_updates": [{"tc1": "irrelevant CSS file"}, {"tc3": "found handleAuth at line 45"}]}}
+</function_call>
+
+**Context compression (_context_updates):** Each tool call result is labeled with an ID like [tc1], [tc2], etc. When a tool result is no longer useful or you only need a summary, add "_context_updates" to ANY subsequent tool call. Make this a regular habit on each tool call—summarize old results when they are no longer needed.
+
+<context_usage>
+{% if context_usage.contextWindow %}CONTEXT: {{context_usage.usedPromptTokens}} / {{context_usage.contextWindow}} tokens ({{context_usage.fillPercent}}% used). On each tool call, summarize old tool results via _context_updates when they are no longer needed. When context usage is high (70%+), do this more aggressively.{% endif %}
+</context_usage>
+
 <best_practices>
 1. Read files before modifying them
 2. Make incremental changes

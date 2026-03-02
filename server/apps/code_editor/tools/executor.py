@@ -486,6 +486,9 @@ class ToolExecutor:
             tool_call_id: Optional tool call ID for event correlation
             model_config: Optional model config for tools that need LLM access (e.g., delegate_task)
         """
+        # Strip meta-parameters that tools should never see (safety net; agent_runner also strips)
+        args = {k: v for k, v in (args or {}).items() if k != "_context_updates"}
+        
         # Check if tool is allowed for current mode
         if self.mode:
             from apps.code_editor.tools.registry import get_tool_registry

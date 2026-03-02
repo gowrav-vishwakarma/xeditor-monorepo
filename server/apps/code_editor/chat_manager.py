@@ -6,7 +6,7 @@ Handles chat storage at ~/.xeditor/projects/{projectName}/chats/{chatId}.json
 import json
 import uuid
 from pathlib import Path
-from typing import Dict, Any, List, Optional, TYPE_CHECKING
+from typing import Dict, Any, List, Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
 from apps.code_editor.project import get_project_manager
 
@@ -156,7 +156,7 @@ class ChatManager:
         family: str = "default",
         set_id: str = "default",
         version: Optional[str] = None,
-    ) -> List[Dict[str, str]]:
+    ) -> tuple[List[Dict[str, str]], int]:
         """
         Build LLM context from chat history, filtering out meta-only content.
         
@@ -164,6 +164,8 @@ class ChatManager:
         ensuring the LLM sees tool calls in a format it recognizes from training.
         This prevents the LLM from learning incorrect tool calling patterns from
         mixed-format history when users switch between model families.
+        
+        Each tool call is numbered with [tcN] prefix for context compression.
         
         Args:
             chat: Chat data with turns
@@ -175,7 +177,8 @@ class ChatManager:
             version: Optional model version
         
         Returns:
-            List of messages in OpenAI format: [{"role": "...", "content": "..."}]
+            Tuple of (messages, next_tool_call_counter). Messages are in OpenAI format.
+            next_tool_call_counter is the next available tcN for new tool calls in the agent loop.
         """
         # Get parser for current family to serialize tool calls in the correct format
         parser: Optional["ResponseParser"] = None
@@ -186,6 +189,7 @@ class ChatManager:
             print(f"Warning: Failed to get parser for family {family}: {e}")
         
         messages = [{"role": "system", "content": system_prompt}]
+        tool_call_counter = 1
         
         # Process historical turns
         for turn in chat.get("turns", []):
@@ -207,9 +211,12 @@ class ChatManager:
             # Build assistant response
             assistant_msg = turn.get("assistantMessage", "")
             
-            # Include tool results that are marked for context
-            # Use family-specific serialization if parser is available
-            tool_summary = self._summarize_tools(turn.get("toolCalls", []), parser=parser)
+            # Include tool results that are marked for context (numbered with [tcN])
+            tool_summary, tool_call_counter = self._summarize_tools(
+                turn.get("toolCalls", []),
+                parser=parser,
+                start_counter=tool_call_counter,
+            )
             if tool_summary:
                 assistant_msg = f"{tool_summary}\n\n{assistant_msg}"
             
@@ -220,7 +227,52 @@ class ChatManager:
         formatted_message = self._format_message_with_context(new_message, user_context)
         messages.append({"role": "user", "content": formatted_message})
         
-        return messages
+        return messages, tool_call_counter
+
+    def build_tc_id_map(self, chat: Dict[str, Any]) -> Dict[str, Tuple[int, int]]:
+        """
+        Build a mapping from tool call IDs (tc1, tc2, ...) to (turn_index, tool_call_index).
+        Only includes turns and tool calls that would be included in context.
+        Used to resolve _context_updates references for persisting summaries.
+        """
+        tc_map: Dict[str, Tuple[int, int]] = {}
+        counter = 1
+        
+        for turn_idx, turn in enumerate(chat.get("turns", [])):
+            if not turn.get("includeInContext", True):
+                continue
+            if turn.get("meta", {}).get("error"):
+                continue
+            
+            for tc_idx, tool in enumerate(turn.get("toolCalls", [])):
+                if not tool.get("includeInContext", True):
+                    continue
+                tc_id = f"tc{counter}"
+                tc_map[tc_id] = (turn_idx, tc_idx)
+                counter += 1
+        
+        return tc_map
+
+    def update_tool_call_summary(
+        self,
+        chat: Dict[str, Any],
+        turn_index: int,
+        tool_call_index: int,
+        summary: str,
+    ) -> bool:
+        """
+        Update a specific tool call's contextSummary in the chat data and persist.
+        """
+        turns = chat.get("turns", [])
+        if turn_index < 0 or turn_index >= len(turns):
+            return False
+        
+        tool_calls = turns[turn_index].get("toolCalls", [])
+        if tool_call_index < 0 or tool_call_index >= len(tool_calls):
+            return False
+        
+        tool_calls[tool_call_index]["contextSummary"] = summary
+        return self.save_chat(chat)
 
     def _format_message_with_context(
         self,
@@ -259,7 +311,8 @@ class ChatManager:
         tool_calls: List[Dict[str, Any]],
         parser: Optional["ResponseParser"] = None,
         max_result_chars: int = 5000,
-    ) -> Optional[str]:
+        start_counter: int = 1,
+    ) -> Tuple[Optional[str], int]:
         """
         Summarize tool calls that should be included in context.
         
@@ -267,10 +320,17 @@ class ChatManager:
         native format (e.g., Harmony tokens for GPT, XML for GLM, etc.).
         This ensures LLMs see tool calls in a format they recognize from training.
         
+        Each tool call is prefixed with [tcN] for context compression via _context_updates.
+        If contextSummary is set, it is used instead of the full result.
+        
         Args:
             tool_calls: List of tool call records
             parser: Optional parser to use for family-specific serialization
             max_result_chars: Maximum characters for tool result string (default 5000)
+            start_counter: Starting counter for [tcN] numbering (default 1)
+        
+        Returns:
+            Tuple of (summary string or None, next_counter)
         """
         included_tools = [
             tool for tool in tool_calls
@@ -278,18 +338,22 @@ class ChatManager:
         ]
         
         if not included_tools:
-            return None
+            return None, start_counter
         
-        summaries = []
+        summaries: List[str] = []
+        counter = start_counter
+        
         for tool in included_tools:
             tool_name = tool.get("tool", "")
             args = tool.get("args", {})
             result = tool.get("result")
             error = tool.get("error")
+            context_summary = tool.get("contextSummary")
             
-            # Format result for the tool call
-            formatted_result = None
-            if error:
+            # Use contextSummary if set (LLM-provided compression)
+            if context_summary is not None and context_summary != "":
+                formatted_result = context_summary
+            elif error:
                 # Error case - result stays None, error is passed to serializer
                 formatted_result = None
             elif result:
@@ -322,10 +386,15 @@ class ChatManager:
                         result_str = result_str[:max_result_chars] + f"... [truncated at {max_result_chars} chars]"
                     
                     formatted_result = result_str
+            else:
+                formatted_result = None
             
             # Use parser's serialize_tool_call if available, otherwise fall back to generic format
+            tc_id = f"tc{counter}"
             if parser:
-                summary = parser.serialize_tool_call(tool_name, args, formatted_result, error)
+                summary = parser.serialize_tool_call(
+                    tool_name, args, formatted_result, error, tool_call_id=tc_id
+                )
             else:
                 # Fallback to generic format (for backwards compatibility)
                 summary = f"Tool: {tool_name}({json.dumps(args)})"
@@ -333,10 +402,11 @@ class ChatManager:
                     summary += f"\nError: {error}"
                 elif formatted_result:
                     summary += f"\nResult: {formatted_result}"
-            
+                summary = f"[{tc_id}] {summary}"
             summaries.append(summary)
+            counter += 1
         
-        return "\n\n".join(summaries)
+        return "\n\n".join(summaries), counter
 
 
 # Singleton instance

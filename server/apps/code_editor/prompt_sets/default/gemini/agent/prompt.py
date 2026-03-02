@@ -37,8 +37,17 @@ Example for reading a file:
 Example for searching code:
 <|channel|>commentary to=search_code <|constrain|>json<|message|>{"query":"search term","path":""}
 
+Example with context compression (replace previous tool results with summaries):
+<|channel|>commentary to=read_file <|constrain|>json<|message|>{"target_file":"other.py","_context_updates":[{"tc1":"irrelevant CSS file"},{"tc3":"found handleAuth at line 45"}]}
+
 The JSON parameters must match the tool's parameter names exactly as described in the tool definitions below.
+
+**Context compression (_context_updates):** Each tool call result is labeled with an ID like [tc1], [tc2], etc. When a tool result is no longer useful or you only need a summary, add "_context_updates" to ANY subsequent tool call. Example: {"target_file":"other.py","_context_updates":[{"tc1":"file was 500 lines of CSS, irrelevant"}]}. Make this a regular habit on each tool call—summarize old results when they are no longer needed. Replace irrelevant results, summarize large outputs, keep only essential findings.
 </tool_calling>
+
+<context_usage>
+{% if context_usage.contextWindow %}CONTEXT: {{context_usage.usedPromptTokens}} / {{context_usage.contextWindow}} tokens ({{context_usage.fillPercent}}% used). On each tool call, summarize old tool results via _context_updates when they are no longer needed. When context usage is high (70%+), do this more aggressively.{% endif %}
+</context_usage>
 
 <search_and_reading>
 If you are unsure about the answer to the USER's request, you should gather more information using additional tool calls, asking clarifying questions, etc...

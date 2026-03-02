@@ -167,6 +167,13 @@ def process_template(
             value = get_nested_value({"project_info": context.project_info or {}}, var_path, False)
         elif var_path.startswith("system_info."):
             value = get_nested_value({"system_info": context.system_info}, var_path, False)
+        elif var_path.startswith("context_usage."):
+            if context.context_usage:
+                value = get_nested_value(
+                    {"context_usage": context.context_usage.to_dict()}, var_path, False
+                )
+            else:
+                value = False
         else:
             value = False
         

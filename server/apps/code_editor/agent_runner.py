@@ -620,6 +620,7 @@ class AgentRunner:
                 )
 
         # Build initial context (after optional pre-execution)
+        tool_call_counter = 1
         if is_sub_agent:
             # Sub-agent uses fresh context with just the system prompt and user task
             messages = [
@@ -627,7 +628,7 @@ class AgentRunner:
                 {"role": "user", "content": llm_user_message},
             ]
         else:
-            messages = self.chat_manager.build_llm_context(
+            messages, tool_call_counter = self.chat_manager.build_llm_context(
                 chat,
                 llm_user_message,
                 user_context,
@@ -1111,6 +1112,39 @@ class AgentRunner:
                                     # Single folder: use the folder itself as root (paths are relative to project root)
                                     project_root = str(folder_paths[0])
                 
+                # Extract and process _context_updates (LLM-driven context compression)
+                context_updates: List[Dict[str, str]] = []
+                if isinstance(tool_args, dict) and "_context_updates" in tool_args:
+                    context_updates = tool_args.pop("_context_updates", [])
+                    if not isinstance(context_updates, list):
+                        context_updates = []
+                
+                # Process context updates: replace previous tool results with summaries
+                if context_updates:
+                    tc_id_map = self.chat_manager.build_tc_id_map(chat)
+                    for update_item in context_updates:
+                        if not isinstance(update_item, dict):
+                            continue
+                        for tc_id, summary in update_item.items():
+                            if not isinstance(summary, str):
+                                continue
+                            # Update in-memory messages (current turn's tool results)
+                            for msg in messages:
+                                if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                                    content = msg["content"]
+                                    if content.startswith(f"[{tc_id}] Tool Result:") or content.startswith(f"[{tc_id}] Tool Error:"):
+                                        msg["content"] = f"[{tc_id}] Tool Result: {summary}"
+                                        break
+                            # Update tool_call_data for current turn
+                            for tc in tool_calls:
+                                if tc.get("tcId") == tc_id:
+                                    tc["contextSummary"] = summary
+                                    break
+                            # Persist for historical tool calls (from previous turns)
+                            if tc_id in tc_id_map:
+                                turn_idx, tc_idx = tc_id_map[tc_id]
+                                self.chat_manager.update_tool_call_summary(chat, turn_idx, tc_idx, summary)
+                
                 # Check if tool is allowed for this set/mode
                 tool_registry = get_tool_registry()
                 set_id = model_config.get("setId", "default")
@@ -1125,8 +1159,10 @@ class AgentRunner:
                     }
                     
                     # Store the blocked tool call
+                    current_tc_id = f"tc{tool_call_counter}"
                     tool_call_data = {
                         "id": tool_call_id,
+                        "tcId": current_tc_id,
                         "tool": tool_name,
                         "args": tool_args,
                         "result": None,
@@ -1134,6 +1170,7 @@ class AgentRunner:
                         "includeInContext": True,
                     }
                     tool_calls.append(tool_call_data)
+                    tool_call_counter += 1
                     
                     # Update tool_call trace event output with error
                     for te in trace_events:
@@ -1160,14 +1197,14 @@ class AgentRunner:
                         **({"parentId": sub_agent_id} if is_sub_agent and sub_agent_id else {}),
                     })
                     
-                    # Add error to messages for next iteration
+                    # Add error to messages for next iteration (with [tcN] prefix)
                     messages.append({
                         "role": "assistant",
                         "content": accumulated_content,
                     })
                     messages.append({
                         "role": "user",
-                        "content": f"Tool Error: {tool_result_data['error']}",
+                        "content": f"[{current_tc_id}] Tool Error: {tool_result_data['error']}",
                     })
                     
                     continue
@@ -1254,8 +1291,10 @@ class AgentRunner:
                     if isinstance(sub_trace_events, list):
                         merged_subagent_trace_events = sub_trace_events
 
+                current_tc_id = f"tc{tool_call_counter}"
                 tool_call_data = {
                     "id": tool_call_id,
+                    "tcId": current_tc_id,
                     "tool": tool_name,
                     "args": tool_args,
                     "result": tool_result_for_ui if tool_result.success else None,
@@ -1367,7 +1406,7 @@ class AgentRunner:
                                 "toolCallId": tool_call_id,
                             })
                 
-                # Append tool result to messages for next iteration
+                # Append tool result to messages for next iteration (with [tcN] prefix for context compression)
                 if tool_result.success:
                     # Format tool result for LLM context (handles read_file specially)
                     result_str = format_tool_result_for_llm(tool_name, tool_result_for_llm)
@@ -1377,7 +1416,7 @@ class AgentRunner:
                     })
                     messages.append({
                         "role": "user",
-                        "content": f"Tool Result: {result_str}",
+                        "content": f"[{current_tc_id}] Tool Result: {result_str}",
                     })
                 else:
                     messages.append({
@@ -1386,8 +1425,9 @@ class AgentRunner:
                     })
                     messages.append({
                         "role": "user",
-                        "content": f"Tool Error: {tool_result.error}",
+                        "content": f"[{current_tc_id}] Tool Error: {tool_result.error}",
                     })
+                tool_call_counter += 1
                 
                 # Special handling for ask_question: stop agent loop and wait for user response
                 # The frontend will display the question form and user response will come as a new user message

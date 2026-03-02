@@ -86,7 +86,14 @@ Example for searching code:
 {"name": "search_code", "arguments": {"query": "search term", "path": ""}}
 </tool_call>
 
+Example with context compression (replace previous tool result [tc1] with a summary):
+<tool_call>
+{"name": "read_file", "arguments": {"target_file": "other.py", "_context_updates": [{"tc1": "irrelevant CSS file"}]}}
+</tool_call>
+
 The JSON parameters must match the tool's parameter names exactly as described in the tool definitions above.
+
+**Context compression (_context_updates):** Each tool call result is labeled with an ID like [tc1], [tc2], etc. When a tool result is no longer useful or you only need a summary, add "_context_updates" to ANY subsequent tool call's arguments. Make this a regular habit on each tool call—summarize old results when they are no longer needed.
 
 ====
 
@@ -103,6 +110,10 @@ RULES
 - Do not ask for more information than necessary. Use the tools provided to accomplish the user's request efficiently and effectively.
 - The user may provide a file's contents directly in their message, in which case you shouldn't use the read_file tool to get the file contents again since you already have it.
 - Your goal is to try to answer the user's question comprehensively, NOT engage in a back and forth conversation unless clarification is truly needed.
+
+<context_usage>
+{% if context_usage.contextWindow %}CONTEXT: {{context_usage.usedPromptTokens}} / {{context_usage.contextWindow}} tokens ({{context_usage.fillPercent}}% used). On each tool call, summarize old tool results via _context_updates when they are no longer needed. When context usage is high (70%+), do this more aggressively.{% endif %}
+</context_usage>
 
 ====
 

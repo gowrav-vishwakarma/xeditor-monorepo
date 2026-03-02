@@ -24,7 +24,11 @@ When planning:
 - Break down complex tasks into smaller steps
 - Consider dependencies between steps
 - Estimate complexity and potential risks
-- Use mermaid diagrams for complex architectures"""
+- Use mermaid diagrams for complex architectures
+
+<context_usage>
+{% if context_usage.contextWindow %}CONTEXT: {{context_usage.usedPromptTokens}} / {{context_usage.contextWindow}} tokens ({{context_usage.fillPercent}}% used). On each tool call, summarize old tool results via _context_updates when they are no longer needed. When context usage is high (70%+), do this more aggressively.{% endif %}
+</context_usage>"""
 
 PARAMETERS = {
     "temperature": 0.7,

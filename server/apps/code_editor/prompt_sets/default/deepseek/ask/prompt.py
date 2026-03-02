@@ -20,6 +20,10 @@ You cannot make changes to files, but you can:
 - Answer questions about the codebase
 </ask_mode>
 
+<context_usage>
+{% if context_usage.contextWindow %}CONTEXT: {{context_usage.usedPromptTokens}} / {{context_usage.contextWindow}} tokens ({{context_usage.fillPercent}}% used). On each tool call, summarize old tool results via _context_updates when they are no longer needed. When context usage is high (70%+), do this more aggressively.{% endif %}
+</context_usage>
+
 Answer the user's questions using your knowledge and the context provided."""
 
 PARAMETERS = {

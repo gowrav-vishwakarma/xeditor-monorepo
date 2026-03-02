@@ -179,6 +179,7 @@ class ResponseParser(ABC):
         args: Dict[str, Any],
         result: Optional[Any] = None,
         error: Optional[str] = None,
+        tool_call_id: Optional[str] = None,
     ) -> str:
         """
         Serialize a tool call into the family's native format for chat context.
@@ -191,6 +192,7 @@ class ResponseParser(ABC):
             args: Arguments passed to the tool
             result: Result from the tool execution (if successful)
             error: Error message (if tool failed)
+            tool_call_id: Optional tool call ID (e.g. tc3) for context compression
             
         Returns:
             Formatted string representing the tool call and its result
@@ -199,12 +201,15 @@ class ResponseParser(ABC):
         tool_call_str = f'<tool_code>{{"tool": "{tool_name}", "args": {json.dumps(args)}}}</tool_code>'
         
         if error:
-            return f"{tool_call_str}\nTool Error: {error}"
+            out = f"{tool_call_str}\nTool Error: {error}"
         elif result is not None:
             result_str = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
-            return f"{tool_call_str}\nTool Result: {result_str}"
+            out = f"{tool_call_str}\nTool Result: {result_str}"
         else:
-            return tool_call_str
+            out = tool_call_str
+        if tool_call_id:
+            out = f"[{tool_call_id}] {out}"
+        return out
 
 
 class DefaultParser(ResponseParser):
@@ -280,17 +285,21 @@ class DefaultParser(ResponseParser):
         args: Dict[str, Any],
         result: Optional[Any] = None,
         error: Optional[str] = None,
+        tool_call_id: Optional[str] = None,
     ) -> str:
         """Serialize tool call using <tool_code> format."""
         tool_call_str = f'<tool_code>{{"tool": "{tool_name}", "args": {json.dumps(args)}}}</tool_code>'
         
         if error:
-            return f"{tool_call_str}\nTool Error: {error}"
+            out = f"{tool_call_str}\nTool Error: {error}"
         elif result is not None:
             result_str = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
-            return f"{tool_call_str}\nTool Result: {result_str}"
+            out = f"{tool_call_str}\nTool Result: {result_str}"
         else:
-            return tool_call_str
+            out = tool_call_str
+        if tool_call_id:
+            out = f"[{tool_call_id}] {out}"
+        return out
 
 
 class ClaudeParser(ResponseParser):
@@ -356,17 +365,21 @@ class ClaudeParser(ResponseParser):
         args: Dict[str, Any],
         result: Optional[Any] = None,
         error: Optional[str] = None,
+        tool_call_id: Optional[str] = None,
     ) -> str:
         """Serialize tool call using <tool_code> format for Claude."""
         tool_call_str = f'<tool_code>{{"tool": "{tool_name}", "args": {json.dumps(args)}}}</tool_code>'
         
         if error:
-            return f"{tool_call_str}\nTool Error: {error}"
+            out = f"{tool_call_str}\nTool Error: {error}"
         elif result is not None:
             result_str = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
-            return f"{tool_call_str}\nTool Result: {result_str}"
+            out = f"{tool_call_str}\nTool Result: {result_str}"
         else:
-            return tool_call_str
+            out = tool_call_str
+        if tool_call_id:
+            out = f"[{tool_call_id}] {out}"
+        return out
 
 
 class GPTParser(ResponseParser):
@@ -436,6 +449,7 @@ class GPTParser(ResponseParser):
         args: Dict[str, Any],
         result: Optional[Any] = None,
         error: Optional[str] = None,
+        tool_call_id: Optional[str] = None,
     ) -> str:
         """Serialize tool call using <tool_code> format for GPT base parser."""
         # Note: The prompt_sets/default/gpt/parser.py uses Harmony format
@@ -443,12 +457,15 @@ class GPTParser(ResponseParser):
         tool_call_str = f'<tool_code>{{"tool": "{tool_name}", "args": {json.dumps(args)}}}</tool_code>'
         
         if error:
-            return f"{tool_call_str}\nTool Error: {error}"
+            out = f"{tool_call_str}\nTool Error: {error}"
         elif result is not None:
             result_str = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
-            return f"{tool_call_str}\nTool Result: {result_str}"
+            out = f"{tool_call_str}\nTool Result: {result_str}"
         else:
-            return tool_call_str
+            out = tool_call_str
+        if tool_call_id:
+            out = f"[{tool_call_id}] {out}"
+        return out
 
 
 class LlamaParser(ResponseParser):
@@ -517,17 +534,21 @@ class LlamaParser(ResponseParser):
         args: Dict[str, Any],
         result: Optional[Any] = None,
         error: Optional[str] = None,
+        tool_call_id: Optional[str] = None,
     ) -> str:
         """Serialize tool call using <function_call> format for Llama."""
         tool_call_str = f'<function_call>{{"name": "{tool_name}", "parameters": {json.dumps(args)}}}</function_call>'
         
         if error:
-            return f"{tool_call_str}\nTool Error: {error}"
+            out = f"{tool_call_str}\nTool Error: {error}"
         elif result is not None:
             result_str = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
-            return f"{tool_call_str}\nTool Result: {result_str}"
+            out = f"{tool_call_str}\nTool Result: {result_str}"
         else:
-            return tool_call_str
+            out = tool_call_str
+        if tool_call_id:
+            out = f"[{tool_call_id}] {out}"
+        return out
 
 
 # Parser registry

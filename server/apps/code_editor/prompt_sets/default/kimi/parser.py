@@ -242,6 +242,7 @@ class KimiParser(ResponseParser):
         args: Dict[str, Any],
         result: Optional[Any] = None,
         error: Optional[str] = None,
+        tool_call_id: Optional[str] = None,
     ) -> str:
         """
         Serialize a tool call into Kimi token format for chat context.
@@ -260,12 +261,15 @@ class KimiParser(ResponseParser):
         )
         
         if error:
-            return f"{tool_call_str}\nTool Error: {error}"
+            out = f"{tool_call_str}\nTool Error: {error}"
         elif result is not None:
             result_str = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
-            return f"{tool_call_str}\nTool Result: {result_str}"
+            out = f"{tool_call_str}\nTool Result: {result_str}"
         else:
-            return tool_call_str
+            out = tool_call_str
+        if tool_call_id:
+            out = f"[{tool_call_id}] {out}"
+        return out
 
 
 parser = KimiParser()
