@@ -86,14 +86,6 @@
         </div>
       </template>
 
-      <!-- Context Compression Item -->
-      <template v-else-if="item.type === 'context_compression'">
-        <div class="context-compression-item">
-          <q-icon name="compress" size="14px" class="q-mr-xs" />
-          <span>Context compressed: {{ item.updates.length }} tool result{{ item.updates.length !== 1 ? 's' : '' }} summarized</span>
-        </div>
-      </template>
-
       <!-- Assistant Message Item -->
       <template v-else-if="item.type === 'assistant_message'">
         <div class="assistant-message-item">
@@ -139,7 +131,6 @@ import type {
   TraceEventToolResult,
   TraceEventThinking,
   TraceEventAssistantMessage,
-  TraceEventContextCompression,
   TraceEventSubAgentStart,
   TraceEventSubAgentEnd,
 } from 'src/apps/CodeEditor/core/types';
@@ -173,7 +164,7 @@ const timelineItems = computed(() => {
       (
         item,
       ): item is {
-        event: TraceEventThinking | TraceEventToolCall | TraceEventAssistantMessage | TraceEventContextCompression;
+        event: TraceEventThinking | TraceEventToolCall | TraceEventAssistantMessage;
         index: number;
       } => {
         const event = item.event;
@@ -184,8 +175,7 @@ const timelineItems = computed(() => {
         if (
           event.type === 'thinking' ||
           event.type === 'tool_call' ||
-          event.type === 'assistant_message' ||
-          event.type === 'context_compression'
+          event.type === 'assistant_message'
         ) {
           return isTopLevel;
         }
@@ -523,18 +513,6 @@ function getDelegateTaskStartEvent(toolCallId: string): TraceEventSubAgentStart 
   opacity: 0.8;
 }
 
-/* Context Compression Item */
-.context-compression-item {
-  display: flex;
-  align-items: center;
-  padding: 4px 10px;
-  background: #fff8e1;
-  border-radius: 6px;
-  border: 1px solid #ffe082;
-  font-size: 11px;
-  color: #f57f17;
-  font-weight: 500;
-}
 
 /* Assistant Message Item */
 .assistant-message-item {

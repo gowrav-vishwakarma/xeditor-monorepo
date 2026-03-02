@@ -233,7 +233,8 @@ class ChatManager:
         """
         Build a mapping from tool call IDs (tc1, tc2, ...) to (turn_index, tool_call_index).
         Only includes turns and tool calls that would be included in context.
-        Skips already-summarized tool calls (they don't get [tcN] labels).
+        Counter always increments for stable numbering; already-summarized
+        tool calls consume a number but are not added to the map.
         Used to resolve _context_updates references for persisting summaries.
         """
         tc_map: Dict[str, Tuple[int, int]] = {}
@@ -249,10 +250,10 @@ class ChatManager:
                 if not tool.get("includeInContext", True):
                     continue
                 context_summary = tool.get("contextSummary")
-                if context_summary is not None and context_summary != "":
-                    continue
-                tc_id = f"tc{counter}"
-                tc_map[tc_id] = (turn_idx, tc_idx)
+                is_summarized = context_summary is not None and context_summary != ""
+                if not is_summarized:
+                    tc_id = f"tc{counter}"
+                    tc_map[tc_id] = (turn_idx, tc_idx)
                 counter += 1
         
         return tc_map
@@ -401,8 +402,7 @@ class ChatManager:
                 if tc_id:
                     summary = f"[{tc_id}] {summary}"
             summaries.append(summary)
-            if not is_already_summarized:
-                counter += 1
+            counter += 1
         
         return "\n\n".join(summaries), counter
 
