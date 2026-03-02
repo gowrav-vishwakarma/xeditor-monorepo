@@ -310,8 +310,8 @@ def format_tool_description(tool_name: str, tool_def: Dict[str, Any]) -> str:
 
 _CONTEXT_UPDATES_PARAM = {
     "type": "array",
-    "required": False,
-    "description": 'Summarize old tool results to free context. Array of objects: [{"tc1":"summary"},{"tc3":"other summary"}]. Include on any tool call when previous results are no longer needed in full.',
+    "required": True,
+    "description": 'REQUIRED. Pass [] if nothing to compress. Otherwise array of objects: [{"tc1":"summary"},{"tc3":"other summary"}]. Only compress [tcN] results you no longer need in full. Keep results you still need for your current task. Results without [tcN] are already compressed — skip them.',
 }
 
 

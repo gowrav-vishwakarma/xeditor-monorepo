@@ -34,22 +34,27 @@ Follow these rules regarding tool calls:
 When you need to call a tool, you MUST use the GLM XML format:
 <tool_call>{function-name}<arg_key>{arg-key-1}</arg_key><arg_value>{arg-value-1}</arg_value><arg_key>{arg-key-2}</arg_key><arg_value>{arg-value-2}</arg_value>...</tool_call>
 
-Example for reading a file:
-<tool_call>read_file<arg_key>target_file</arg_key><arg_value>path/to/file.vue</arg_value></tool_call>
+Example — first tool call (nothing to compress yet, pass empty array):
+<tool_call>read_file<arg_key>target_file</arg_key><arg_value>path/to/file.vue</arg_value><arg_key>_context_updates</arg_key><arg_value>[]</arg_value></tool_call>
 
-Example for searching code:
-<tool_call>search_code<arg_key>query</arg_key><arg_value>search term</arg_value><arg_key>path</arg_key><arg_value></arg_value></tool_call>
+Example — searching code (nothing to compress yet):
+<tool_call>search_code<arg_key>query</arg_key><arg_value>search term</arg_value><arg_key>path</arg_key><arg_value></arg_value><arg_key>_context_updates</arg_key><arg_value>[]</arg_value></tool_call>
 
-Example with context compression (replace previous tool result [tc1] with a summary):
+Example — reading a file while compressing a previous result:
 <tool_call>read_file<arg_key>target_file</arg_key><arg_value>other.py</arg_value><arg_key>_context_updates</arg_key><arg_value>[{"tc1":"irrelevant CSS file"}]</arg_value></tool_call>
 
 The parameter names must match the tool's parameter names exactly as described in the tool definitions below.
 
-**Context compression (_context_updates):** Each tool call result is labeled with an ID like [tc1], [tc2], etc. When a tool result is no longer useful or you only need a summary, add "_context_updates" as a parameter to ANY subsequent tool call. Pass an array of objects: [{"tc1":"summary"}]. Make this a regular habit on each tool call—summarize old results when they are no longer needed.
+**Context compression (_context_updates) — REQUIRED on every tool call:**
+Each tool result is labeled [tcN]. You MUST include `_context_updates` in every tool call:
+- Pass `[]` if no results need compression right now
+- Pass `[{"tc1": "summary"}, ...]` to compress results you no longer need in full
+
+Only compress what you truly no longer need. Results without [tcN] are already compressed — do NOT re-compress them.
 </tool_calling>
 
 <context_usage>
-{% if context_usage.contextWindow %}CONTEXT: {{context_usage.usedPromptTokens}} / {{context_usage.contextWindow}} tokens ({{context_usage.fillPercent}}% used). On each tool call, summarize old tool results via _context_updates when they are no longer needed. When context usage is high (70%+), do this more aggressively.{% endif %}
+{% if context_usage.contextWindow %}CONTEXT: {{context_usage.usedPromptTokens}} / {{context_usage.contextWindow}} tokens ({{context_usage.fillPercent}}% used). When you reach 100%, you CANNOT continue — the conversation dies. Compress old tool results via _context_updates on every tool call. After 70%, compress aggressively — keep only essential findings, replace everything else with one-line summaries.{% endif %}
 </context_usage>
 
 <search_and_reading>

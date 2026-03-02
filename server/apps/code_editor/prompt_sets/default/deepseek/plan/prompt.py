@@ -27,7 +27,7 @@ When planning:
 - Use mermaid diagrams for complex architectures
 
 <context_usage>
-{% if context_usage.contextWindow %}CONTEXT: {{context_usage.usedPromptTokens}} / {{context_usage.contextWindow}} tokens ({{context_usage.fillPercent}}% used). On each tool call, summarize old tool results via _context_updates when they are no longer needed. When context usage is high (70%+), do this more aggressively.{% endif %}
+{% if context_usage.contextWindow %}CONTEXT: {{context_usage.usedPromptTokens}} / {{context_usage.contextWindow}} tokens ({{context_usage.fillPercent}}% used). When you reach 100%, you CANNOT continue — the conversation dies. Compress old tool results via _context_updates on every tool call (pass [] if nothing to compress). After 70%, compress aggressively — keep only essential findings, replace everything else with one-line summaries.{% endif %}
 </context_usage>"""
 
 PARAMETERS = {

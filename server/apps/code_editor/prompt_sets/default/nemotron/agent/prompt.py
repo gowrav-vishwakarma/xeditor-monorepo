@@ -36,22 +36,24 @@ When you need to call a tool, you MUST use the Nemotron tool call format:
 </function>
 </tool_call>
 
-Example for reading a file:
+Example — first tool call (nothing to compress yet, pass empty array):
 <tool_call>
 <function=read_file>
 <parameter=target_file>path/to/file.vue</parameter>
+<parameter=_context_updates>[]</parameter>
 </function>
 </tool_call>
 
-Example for searching code:
+Example — searching code (nothing to compress yet):
 <tool_call>
 <function=search_code>
 <parameter=query>search term</parameter>
 <parameter=path></parameter>
+<parameter=_context_updates>[]</parameter>
 </function>
 </tool_call>
 
-Example with context compression (replace previous tool results with summaries):
+Example — reading a new file while compressing two previous results:
 <tool_call>
 <function=read_file>
 <parameter=target_file>other.py</parameter>
@@ -61,11 +63,22 @@ Example with context compression (replace previous tool results with summaries):
 
 The parameter names must match the tool's parameter names exactly as described in the tool definitions below. Parameter values can be strings, numbers, booleans (true/false), null, or JSON objects/arrays.
 
-**Context compression (_context_updates):** Each tool call result is labeled with an ID like [tc1], [tc2], etc. When a tool result is no longer useful or you only need a summary, add "_context_updates" as a parameter to ANY subsequent tool call. Pass an array of objects: [{"tc1":"summary"},{"tc3":"other summary"}]. Make this a regular habit on each tool call—summarize old results when they are no longer needed. Replace irrelevant results, summarize large outputs, keep only essential findings.
+**Context compression (_context_updates) — REQUIRED on every tool call:**
+Each tool result is labeled [tcN]. You MUST include `_context_updates` in every tool call:
+- Pass `[]` if no results need compression right now
+- Pass `[{"tc1": "summary"}, ...]` to compress results you no longer need in full
+
+Only compress what you truly no longer need. If you still need the code or details for your current task, keep it. Results without [tcN] are already compressed — do NOT try to re-compress them.
+
+When to compress:
+- File read returned large content you've already extracted what you need from → compress to key findings
+- Search returned many results but only a few matter → compress to just the relevant hits
+- You've moved on to a different part of the task and old results are irrelevant → compress to one-line summaries
+- Do NOT compress results you still need to reference for code edits, comparisons, or analysis
 </tool_calling>
 
 <context_usage>
-{% if context_usage.contextWindow %}CONTEXT: {{context_usage.usedPromptTokens}} / {{context_usage.contextWindow}} tokens ({{context_usage.fillPercent}}% used). On each tool call, summarize old tool results via _context_updates when they are no longer needed. When context usage is high (70%+), do this more aggressively.{% endif %}
+{% if context_usage.contextWindow %}CONTEXT: {{context_usage.usedPromptTokens}} / {{context_usage.contextWindow}} tokens ({{context_usage.fillPercent}}% used). When you reach 100%, you CANNOT continue — the conversation dies. Compress old tool results via _context_updates on every tool call. After 70%, compress aggressively — keep only essential findings, replace everything else with one-line summaries.{% endif %}
 </context_usage>
 
 <search_and_reading>

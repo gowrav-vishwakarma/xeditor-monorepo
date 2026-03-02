@@ -76,24 +76,29 @@ When you need to call a tool, you MUST use the Qwen format:
 {"name": "<tool_name>", "arguments": {"param1": "value1", "param2": "value2"}}
 </tool_call>
 
-Example for reading a file:
+Example — first tool call (nothing to compress yet, pass empty array):
 <tool_call>
-{"name": "read_file", "arguments": {"target_file": "path/to/file.vue"}}
+{"name": "read_file", "arguments": {"target_file": "path/to/file.vue", "_context_updates": []}}
 </tool_call>
 
-Example for searching code:
+Example — searching code (nothing to compress yet):
 <tool_call>
-{"name": "search_code", "arguments": {"query": "search term", "path": ""}}
+{"name": "search_code", "arguments": {"query": "search term", "path": "", "_context_updates": []}}
 </tool_call>
 
-Example with context compression (replace previous tool result [tc1] with a summary):
+Example — reading a new file while compressing two previous results:
 <tool_call>
-{"name": "read_file", "arguments": {"target_file": "other.py", "_context_updates": [{"tc1": "irrelevant CSS file"}]}}
+{"name": "read_file", "arguments": {"target_file": "src/auth.ts", "_context_updates": [{"tc1": "large file returned truncated, reading by line range instead"}, {"tc3": "lines 1-80: only imports and type definitions, nothing relevant to the bug"}]}}
 </tool_call>
 
 The JSON parameters must match the tool's parameter names exactly as described in the tool definitions above.
 
-**Context compression (_context_updates):** Each tool call result is labeled with an ID like [tc1], [tc2], etc. When a tool result is no longer useful or you only need a summary, add "_context_updates" to ANY subsequent tool call's arguments. Make this a regular habit on each tool call—summarize old results when they are no longer needed.
+**Context compression (_context_updates) — REQUIRED on every tool call:**
+Each tool result is labeled [tcN]. You MUST include `_context_updates` in every tool call:
+- Pass `[]` if no results need compression right now
+- Pass `[{"tc1": "summary"}, ...]` to compress results you no longer need in full
+
+Only compress what you truly no longer need. Results without [tcN] are already compressed — do NOT re-compress them.
 
 ====
 
@@ -112,7 +117,7 @@ RULES
 - Your goal is to try to answer the user's question comprehensively, NOT engage in a back and forth conversation unless clarification is truly needed.
 
 <context_usage>
-{% if context_usage.contextWindow %}CONTEXT: {{context_usage.usedPromptTokens}} / {{context_usage.contextWindow}} tokens ({{context_usage.fillPercent}}% used). On each tool call, summarize old tool results via _context_updates when they are no longer needed. When context usage is high (70%+), do this more aggressively.{% endif %}
+{% if context_usage.contextWindow %}CONTEXT: {{context_usage.usedPromptTokens}} / {{context_usage.contextWindow}} tokens ({{context_usage.fillPercent}}% used). When you reach 100%, you CANNOT continue — the conversation dies. Compress old tool results via _context_updates on every tool call. After 70%, compress aggressively — keep only essential findings, replace everything else with one-line summaries.{% endif %}
 </context_usage>
 
 ====

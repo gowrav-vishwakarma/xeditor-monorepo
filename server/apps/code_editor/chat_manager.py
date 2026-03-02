@@ -233,6 +233,7 @@ class ChatManager:
         """
         Build a mapping from tool call IDs (tc1, tc2, ...) to (turn_index, tool_call_index).
         Only includes turns and tool calls that would be included in context.
+        Skips already-summarized tool calls (they don't get [tcN] labels).
         Used to resolve _context_updates references for persisting summaries.
         """
         tc_map: Dict[str, Tuple[int, int]] = {}
@@ -246,6 +247,9 @@ class ChatManager:
             
             for tc_idx, tool in enumerate(turn.get("toolCalls", [])):
                 if not tool.get("includeInContext", True):
+                    continue
+                context_summary = tool.get("contextSummary")
+                if context_summary is not None and context_summary != "":
                     continue
                 tc_id = f"tc{counter}"
                 tc_map[tc_id] = (turn_idx, tc_idx)
@@ -349,18 +353,14 @@ class ChatManager:
             result = tool.get("result")
             error = tool.get("error")
             context_summary = tool.get("contextSummary")
+            is_already_summarized = context_summary is not None and context_summary != ""
             
-            # Use contextSummary if set (LLM-provided compression)
-            if context_summary is not None and context_summary != "":
+            if is_already_summarized:
                 formatted_result = context_summary
             elif error:
-                # Error case - result stays None, error is passed to serializer
                 formatted_result = None
             elif result:
-                # Format result based on tool type
                 if tool_name == "read_file" and isinstance(result, dict):
-                    # read_file returns structured data with pre-chunked content
-                    # Format it nicely for context
                     total_lines = result.get("totalLines", "?")
                     truncated = result.get("truncated", False)
                     strategy = result.get("strategy", "full")
@@ -371,16 +371,13 @@ class ChatManager:
                         meta_info += f", {strategy}"
                     meta_info += "]"
                     
-                    # Include metadata and content
                     result_str = f"{meta_info}\n{content}"
                     
-                    # Apply cap as safety net
                     if len(result_str) > max_result_chars:
                         result_str = result_str[:max_result_chars] + f"\n... [truncated at {max_result_chars} chars]"
                     
                     formatted_result = result_str
                 else:
-                    # Other tools: serialize and truncate if needed
                     result_str = json.dumps(result) if isinstance(result, dict) else str(result)
                     if len(result_str) > max_result_chars:
                         result_str = result_str[:max_result_chars] + f"... [truncated at {max_result_chars} chars]"
@@ -389,22 +386,23 @@ class ChatManager:
             else:
                 formatted_result = None
             
-            # Use parser's serialize_tool_call if available, otherwise fall back to generic format
-            tc_id = f"tc{counter}"
+            # Already-summarized results: no [tcN] so LLM won't try to re-summarize
+            tc_id = None if is_already_summarized else f"tc{counter}"
             if parser:
                 summary = parser.serialize_tool_call(
                     tool_name, args, formatted_result, error, tool_call_id=tc_id
                 )
             else:
-                # Fallback to generic format (for backwards compatibility)
                 summary = f"Tool: {tool_name}({json.dumps(args)})"
                 if error:
                     summary += f"\nError: {error}"
                 elif formatted_result:
                     summary += f"\nResult: {formatted_result}"
-                summary = f"[{tc_id}] {summary}"
+                if tc_id:
+                    summary = f"[{tc_id}] {summary}"
             summaries.append(summary)
-            counter += 1
+            if not is_already_summarized:
+                counter += 1
         
         return "\n\n".join(summaries), counter
 
