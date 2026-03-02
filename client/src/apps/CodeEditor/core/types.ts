@@ -558,6 +558,13 @@ export interface TraceEventAssistantMessage {
   step?: number; // Optional step number for multi-step agent turns
 }
 
+export interface TraceEventContextCompression {
+  type: 'context_compression';
+  id: TraceEventId;
+  timestamp: number;
+  updates: Array<{ tcId: string; summary: string }>;
+}
+
 export type TraceEvent =
   | TraceEventToolCall
   | TraceEventToolChunk
@@ -567,7 +574,8 @@ export type TraceEvent =
   | TraceEventSubAgentStart
   | TraceEventSubAgentEnd
   | TraceEventFileChange
-  | TraceEventAssistantMessage;
+  | TraceEventAssistantMessage
+  | TraceEventContextCompression;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent Activity Types (for live progress display during agent execution)

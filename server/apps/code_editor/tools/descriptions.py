@@ -308,6 +308,13 @@ def format_tool_description(tool_name: str, tool_def: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+_CONTEXT_UPDATES_PARAM = {
+    "type": "array",
+    "required": False,
+    "description": 'Summarize old tool results to free context. Array of objects: [{"tc1":"summary"},{"tc3":"other summary"}]. Include on any tool call when previous results are no longer needed in full.',
+}
+
+
 def get_tool_definitions_for_mode(
     mode: str,
     set_id: str = "default",
@@ -333,16 +340,23 @@ def get_tool_definitions_for_mode(
     
     for tool_name in tool_names:
         if tool_name in TOOL_DESCRIPTIONS:
-            # System tool - use built-in description
             tool_def = TOOL_DESCRIPTIONS[tool_name].copy()
             tool_def["name"] = tool_name
+            tool_def["parameters"] = {
+                **tool_def.get("parameters", {}),
+                "_context_updates": _CONTEXT_UPDATES_PARAM,
+            }
             tool_def["formatted"] = format_tool_description(tool_name, tool_def)
             tool_definitions.append(tool_def)
         else:
-            # Custom tool - try to load TOOL_DESCRIPTOR from module
             tool_def = _load_custom_tool_descriptor(
                 tool_name, mode, set_id, family, version
             )
+            tool_def["parameters"] = {
+                **tool_def.get("parameters", {}),
+                "_context_updates": _CONTEXT_UPDATES_PARAM,
+            }
+            tool_def["formatted"] = format_tool_description(tool_name, tool_def)
             tool_definitions.append(tool_def)
     
     return tool_definitions

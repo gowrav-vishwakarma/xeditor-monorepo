@@ -373,6 +373,10 @@ export const useChatStore = defineStore('chat', () => {
             onEvent?.(eventType, data);
             break;
 
+          case 'context_compression':
+            onEvent?.(eventType, data);
+            break;
+
           case 'turn_complete':
             // Reload session to get updated turn
             void loadSession(currentSession.value!.id);

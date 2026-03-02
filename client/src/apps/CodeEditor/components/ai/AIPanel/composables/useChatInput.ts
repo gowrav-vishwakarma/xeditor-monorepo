@@ -662,6 +662,21 @@ export function useChatInput(chatInputRef: Ref<InstanceType<typeof QInput> | nul
             break;
           }
 
+          case 'context_compression': {
+            const compressionData = data as {
+              id: string;
+              updates: Array<{ tcId: string; summary: string }>;
+            };
+            const compressionEvent: Extract<TraceEvent, { type: 'context_compression' }> = {
+              type: 'context_compression',
+              id: compressionData.id,
+              timestamp: Date.now(),
+              updates: compressionData.updates,
+            };
+            pendingTurn.value.traceEvents.push(compressionEvent);
+            break;
+          }
+
           case 'turn_complete': {
             // Set isLoading to false to re-enable input
             isLoading.value = false;

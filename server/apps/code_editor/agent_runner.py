@@ -6,6 +6,7 @@ Handles agent mode execution with tool calling and streaming events.
 import uuid
 import json
 import re
+import logging
 from typing import Dict, Any, List, Optional, Callable, Awaitable
 from datetime import datetime
 from pathlib import Path
@@ -1057,17 +1058,24 @@ class AgentRunner:
                     # Reset assistant message ID when tool starts - next text will be a new segment
                     current_assistant_message_id = None
                     
-                    # Emit tool start event
+                    # Extract _context_updates BEFORE emitting events so args sent to frontend are clean
+                    context_updates: List[Dict[str, str]] = []
+                    if isinstance(tool_args, dict) and "_context_updates" in tool_args:
+                        context_updates = tool_args.pop("_context_updates", [])
+                        if not isinstance(context_updates, list):
+                            context_updates = []
+                        logging.info("[context_compression] LLM sent _context_updates with %d entries on tool '%s'", len(context_updates), tool_name)
+                    
+                    # Emit tool start event (args are now clean of meta-parameters)
                     tool_call_id = str(uuid.uuid4())
                     tool_start_timestamp = int(datetime.now().timestamp() * 1000)
-                    # Add tool_call trace event with proper timestamp
                     trace_events.append({
                         "type": "tool_call",
                         "id": tool_call_id,
                         "timestamp": tool_start_timestamp,
                         "toolName": tool_name,
                         "arguments": tool_args,
-                        "output": "",  # Initialize output for streaming
+                        "output": "",
                     })
                     await emit_event("tool_start", {
                         "tool": tool_name,
@@ -1079,48 +1087,9 @@ class AgentRunner:
                     await emit_event("error", {"message": error_message})
                     break
                 
-                # Get project root for tool execution
-                project_manager = get_project_manager()
-                project = project_manager.get_project(project_id)
-                project_root = None
-                if project:
-                    # Get project root from folders (this is the actual project being edited, not the IDE workspace)
-                    folders = project.get("folders", [])
-                    if folders and len(folders) > 0:
-                        # Try both 'path' and 'systemPath' fields (folders may have either)
-                        folder_paths = []
-                        for f in folders:
-                            folder_path = f.get("systemPath") or f.get("path", "")
-                            if folder_path:
-                                folder_paths.append(Path(folder_path))
-                        
-                        if folder_paths:
-                            if len(folder_paths) > 1:
-                                # Multi-folder project: find common root
-                                common_parts = []
-                                for parts in zip(*[p.parts for p in folder_paths]):
-                                    if len(set(parts)) == 1:
-                                        common_parts.append(parts[0])
-                                    else:
-                                        break
-                                if common_parts:
-                                    project_root = str(Path(*common_parts))
-                                else:
-                                    # No common root, use first folder's parent
-                                    project_root = str(folder_paths[0].parent)
-                            else:
-                                    # Single folder: use the folder itself as root (paths are relative to project root)
-                                    project_root = str(folder_paths[0])
-                
-                # Extract and process _context_updates (LLM-driven context compression)
-                context_updates: List[Dict[str, str]] = []
-                if isinstance(tool_args, dict) and "_context_updates" in tool_args:
-                    context_updates = tool_args.pop("_context_updates", [])
-                    if not isinstance(context_updates, list):
-                        context_updates = []
-                
                 # Process context updates: replace previous tool results with summaries
                 if context_updates:
+                    applied_updates: List[Dict[str, str]] = []
                     tc_id_map = self.chat_manager.build_tc_id_map(chat)
                     for update_item in context_updates:
                         if not isinstance(update_item, dict):
@@ -1128,13 +1097,46 @@ class AgentRunner:
                         for tc_id, summary in update_item.items():
                             if not isinstance(summary, str):
                                 continue
-                            # Update in-memory messages (current turn's tool results)
+                            logging.info("[context_compression] Summarizing %s -> '%s'", tc_id, summary[:80])
+                            found_in_memory = False
+                            # Update in-memory messages: current turn tool results (user messages)
                             for msg in messages:
                                 if msg.get("role") == "user" and isinstance(msg.get("content"), str):
                                     content = msg["content"]
                                     if content.startswith(f"[{tc_id}] Tool Result:") or content.startswith(f"[{tc_id}] Tool Error:"):
                                         msg["content"] = f"[{tc_id}] Tool Result: {summary}"
+                                        found_in_memory = True
+                                        logging.info("[context_compression] Updated %s in-memory (user message)", tc_id)
                                         break
+                            # Update in-memory messages: previous turns (embedded in assistant messages)
+                            if not found_in_memory:
+                                for msg in messages:
+                                    if msg.get("role") == "assistant" and isinstance(msg.get("content"), str):
+                                        content = msg["content"]
+                                        marker = f"[{tc_id}]"
+                                        if marker not in content:
+                                            continue
+                                        # Find the [tcN] block boundaries and replace the result portion
+                                        # Pattern: [tcN] ...tool call... Result: <content> (until next [tcM] or end)
+                                        next_tc_pattern = re.compile(r'\[tc\d+\]')
+                                        marker_pos = content.find(marker)
+                                        if marker_pos == -1:
+                                            continue
+                                        # Find where this tc block's content ends (next [tcM] marker or end of string)
+                                        search_after = marker_pos + len(marker)
+                                        next_match = next_tc_pattern.search(content, search_after)
+                                        block_end = next_match.start() if next_match else len(content)
+                                        block = content[marker_pos:block_end]
+                                        # Replace result content within the block
+                                        result_marker_idx = block.find("Result:")
+                                        if result_marker_idx != -1:
+                                            new_block = block[:result_marker_idx] + f"Result: {summary}\n"
+                                            msg["content"] = content[:marker_pos] + new_block + content[block_end:]
+                                            found_in_memory = True
+                                            logging.info("[context_compression] Updated %s in-memory (assistant message)", tc_id)
+                                            break
+                            if not found_in_memory:
+                                logging.info("[context_compression] %s not found in current in-memory messages (will apply on next turn)", tc_id)
                             # Update tool_call_data for current turn
                             for tc in tool_calls:
                                 if tc.get("tcId") == tc_id:
@@ -1144,6 +1146,50 @@ class AgentRunner:
                             if tc_id in tc_id_map:
                                 turn_idx, tc_idx = tc_id_map[tc_id]
                                 self.chat_manager.update_tool_call_summary(chat, turn_idx, tc_idx, summary)
+                                logging.info("[context_compression] Persisted %s summary to chat (turn %d, tc %d)", tc_id, turn_idx, tc_idx)
+                            applied_updates.append({"tcId": tc_id, "summary": summary})
+                    
+                    # Emit trace event so context compression is visible in the activity timeline
+                    if applied_updates:
+                        compression_event_id = str(uuid.uuid4())
+                        trace_events.append({
+                            "type": "context_compression",
+                            "id": compression_event_id,
+                            "timestamp": int(datetime.now().timestamp() * 1000),
+                            "updates": applied_updates,
+                        })
+                        await emit_event("context_compression", {
+                            "id": compression_event_id,
+                            "updates": applied_updates,
+                        })
+                
+                # Get project root for tool execution
+                project_manager = get_project_manager()
+                project = project_manager.get_project(project_id)
+                project_root = None
+                if project:
+                    folders = project.get("folders", [])
+                    if folders and len(folders) > 0:
+                        folder_paths = []
+                        for f in folders:
+                            folder_path = f.get("systemPath") or f.get("path", "")
+                            if folder_path:
+                                folder_paths.append(Path(folder_path))
+                        
+                        if folder_paths:
+                            if len(folder_paths) > 1:
+                                common_parts = []
+                                for parts in zip(*[p.parts for p in folder_paths]):
+                                    if len(set(parts)) == 1:
+                                        common_parts.append(parts[0])
+                                    else:
+                                        break
+                                if common_parts:
+                                    project_root = str(Path(*common_parts))
+                                else:
+                                    project_root = str(folder_paths[0].parent)
+                            else:
+                                    project_root = str(folder_paths[0])
                 
                 # Check if tool is allowed for this set/mode
                 tool_registry = get_tool_registry()

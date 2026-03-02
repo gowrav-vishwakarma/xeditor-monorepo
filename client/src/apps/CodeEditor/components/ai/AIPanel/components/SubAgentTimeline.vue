@@ -199,6 +199,7 @@ const childItems = computed(() => {
       if (e.type === 'tool_chunk') return false;
       if (e.type === 'file_change') return false;
       if (e.type === 'context_retrieval') return false;
+      if (e.type === 'context_compression') return false;
       return e.parentId === subAgentId;
     })
     .sort((a, b) => a.timestamp - b.timestamp);
