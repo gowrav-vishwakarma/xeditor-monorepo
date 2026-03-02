@@ -7,7 +7,12 @@ import { useEditorStore } from '../../../../stores/editor';
 import { ContextManager } from '../../../../core/context/ContextManager';
 import { useMention } from './useMention';
 import { useTraceEvents } from './useTraceEvents';
-import type { TraceEvent, EditorTab, ChatSessionId } from 'src/apps/CodeEditor/core/types';
+import type {
+  TraceEvent,
+  TraceEventToolResult,
+  EditorTab,
+  ChatSessionId,
+} from 'src/apps/CodeEditor/core/types';
 import { isPreviewable, getFileExtension } from '../../../../config/previewable';
 import type { PendingQuestion, Question, QuestionSkippedData } from '../types/questions';
 import { QUESTION_SKIPPED_MARKER as SKIP_MARKER } from '../types/questions';
@@ -478,6 +483,7 @@ export function useChatInput(chatInputRef: Ref<InstanceType<typeof QInput> | nul
               error?: string;
               id: string;
               parentId?: string;
+              tcId?: string;
             };
             const toolResultEvent: Extract<TraceEvent, { type: 'tool_result' }> = {
               type: 'tool_result',
@@ -486,6 +492,7 @@ export function useChatInput(chatInputRef: Ref<InstanceType<typeof QInput> | nul
               toolCallId: toolResultData.id,
               result: toolResultData.result,
               ...(toolResultData.parentId && { parentId: toolResultData.parentId }),
+              ...(toolResultData.tcId && { tcId: toolResultData.tcId }),
             };
             if (toolResultData.error) {
               toolResultEvent.error = toolResultData.error;
@@ -674,6 +681,15 @@ export function useChatInput(chatInputRef: Ref<InstanceType<typeof QInput> | nul
               updates: compressionData.updates,
             };
             pendingTurn.value.traceEvents.push(compressionEvent);
+            // Link context summary to matching tool_result trace events in current turn
+            for (const update of compressionData.updates) {
+              const matchingResult = pendingTurn.value.traceEvents.find(
+                (e) => e.type === 'tool_result' && (e as TraceEventToolResult).tcId === update.tcId,
+              ) as TraceEventToolResult | undefined;
+              if (matchingResult) {
+                matchingResult.contextSummary = update.summary;
+              }
+            }
             break;
           }
 

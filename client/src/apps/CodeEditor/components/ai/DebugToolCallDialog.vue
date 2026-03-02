@@ -75,6 +75,26 @@
           }}</pre>
         </div>
 
+        <!-- Context Summary Section (when result was compressed by LLM) -->
+        <div
+          v-if="toolCallData.contextSummary && !isSubAgentTool"
+          class="tool-call-section context-summary-section"
+        >
+          <div class="tool-call-label row items-center justify-between">
+            <span>Context Summary (compressed by LLM):</span>
+            <q-btn
+              flat
+              dense
+              icon="content_copy"
+              size="sm"
+              @click="copyToClipboard(toolCallData.contextSummary || '')"
+            >
+              <q-tooltip>Copy to clipboard</q-tooltip>
+            </q-btn>
+          </div>
+          <pre class="tool-call-content context-summary-content">{{ toolCallData.contextSummary }}</pre>
+        </div>
+
         <!-- Error Section -->
         <div v-if="toolCallData.error" class="tool-call-section tool-call-error">
           <div class="tool-call-label row items-center justify-between">
@@ -157,6 +177,7 @@ const toolCallData = computed(() => {
     output: props.toolCall.output,
     result: props.toolResult?.result,
     error: props.toolResult?.error,
+    contextSummary: props.toolResult?.contextSummary,
   };
 });
 
@@ -281,6 +302,17 @@ function handleNestedToolInspect(toolCallId: string) {
 
 .tool-call-error .error-content {
   color: #ff6b6b;
+}
+
+/* Context summary - amber styling to indicate compression */
+.context-summary-section .tool-call-label {
+  color: #f57f17;
+}
+
+.context-summary-content {
+  background: #fff8e1;
+  color: #5d4037;
+  border: 1px solid #ffe082;
 }
 
 .tool-call-section:last-child {

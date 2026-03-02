@@ -41,6 +41,15 @@
             </div>
             <div class="tool-call-content">
               <span class="tool-name">{{ item.toolName }}</span>
+              <span v-if="hasContextSummary(item.id)">
+                <q-tooltip>Result was compressed by LLM via context summary</q-tooltip>
+                <q-badge
+                  color="amber-7"
+                  text-color="white"
+                  class="q-ml-xs"
+                  label="Compressed"
+                />
+              </span>
               <span v-if="hasBriefArgs(item.arguments)" class="tool-args">
                 {{ formatBriefArgs(item.arguments) }}
               </span>
@@ -234,6 +243,11 @@ function isToolRunning(toolCallId: string): boolean {
 function hasToolError(toolCallId: string): boolean {
   const result = toolResults.value.get(toolCallId);
   return !!result?.error;
+}
+
+function hasContextSummary(toolCallId: string): boolean {
+  const result = toolResults.value.get(toolCallId);
+  return !!(result && 'contextSummary' in result && result.contextSummary);
 }
 
 function hasToolResult(toolCallId: string): boolean {

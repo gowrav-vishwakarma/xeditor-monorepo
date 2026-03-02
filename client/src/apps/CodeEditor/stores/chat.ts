@@ -451,6 +451,8 @@ export const useChatStore = defineStore('chat', () => {
           result?: unknown;
           error?: string;
           includeInContext?: boolean;
+          tcId?: string;
+          contextSummary?: string;
         }>;
       };
 
@@ -615,11 +617,24 @@ export const useChatStore = defineStore('chat', () => {
               timestamp: t.timestamp,
               toolCallId: toolCall.id,
               result: toolCall.result,
+              ...(toolCall.tcId && { tcId: toolCall.tcId }),
+              ...(toolCall.contextSummary && { contextSummary: toolCall.contextSummary }),
             };
             if (toolCall.error) {
               toolResultEvent.error = toolCall.error;
             }
             chatTurn.traceEvents.push(toolResultEvent);
+          }
+        }
+        // Cross-reference: propagate contextSummary from toolCalls to matching tool_result trace events
+        for (const toolCall of t.toolCalls) {
+          if (toolCall.contextSummary) {
+            const matchingResult = chatTurn.traceEvents.find(
+              (e) => e.type === 'tool_result' && e.toolCallId === toolCall.id,
+            );
+            if (matchingResult && matchingResult.type === 'tool_result') {
+              matchingResult.contextSummary = toolCall.contextSummary;
+            }
           }
         }
       }

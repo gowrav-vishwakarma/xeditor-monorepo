@@ -495,6 +495,10 @@ export interface TraceEventToolResult {
   toolCallId: TraceEventId;
   result: unknown;
   error?: string | undefined;
+  /** "tc1", "tc2", etc. - used to link context_compression updates */
+  tcId?: string;
+  /** Set when result was compressed by LLM via _context_updates */
+  contextSummary?: string;
 }
 
 export interface TraceEventContextRetrieval {

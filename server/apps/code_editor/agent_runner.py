@@ -1230,6 +1230,7 @@ class AgentRunner:
                         "result": None,
                         "error": tool_result_data["error"],
                         "id": tool_call_id,
+                        "tcId": current_tc_id,
                     }
                     await emit_event("tool_result", tool_result_event_data)
                     # Persist tool_result trace event (needed for nested/sub-agent replay after reload)
@@ -1240,6 +1241,7 @@ class AgentRunner:
                         "toolCallId": tool_call_id,
                         "result": None,
                         "error": tool_result_data["error"],
+                        "tcId": current_tc_id,
                         **({"parentId": sub_agent_id} if is_sub_agent and sub_agent_id else {}),
                     })
                     
@@ -1387,6 +1389,7 @@ class AgentRunner:
                     "result": tool_result_for_ui if tool_result.success else None,
                     "error": tool_result.error,
                     "id": tool_call_id,
+                    "tcId": current_tc_id,
                 }
                 await emit_event("tool_result", tool_result_event_data)
                 # Persist tool_result trace event (needed for nested/sub-agent replay after reload)
@@ -1396,6 +1399,7 @@ class AgentRunner:
                     "timestamp": int(datetime.now().timestamp() * 1000),
                     "toolCallId": tool_call_id,
                     "result": tool_result_event_data.get("result"),
+                    "tcId": current_tc_id,
                     **({"error": tool_result.error} if tool_result.error else {}),
                     **({"parentId": sub_agent_id} if is_sub_agent and sub_agent_id else {}),
                 })
