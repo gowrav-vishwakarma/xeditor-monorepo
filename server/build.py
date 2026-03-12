@@ -51,6 +51,8 @@ def _get_ripgrep_platform_info() -> tuple[str, str, str]:
         machine = platform.machine().lower()
         if machine in ("x86_64", "amd64"):
             return ("x86_64-unknown-linux-musl", "tar.gz", "rg")
+        elif machine in ("aarch64", "arm64"):
+            return ("aarch64-unknown-linux-gnu", "tar.gz", "rg")
         elif machine.startswith("arm"):
             return ("arm-unknown-linux-gnueabihf", "tar.gz", "rg")
         else:
@@ -283,22 +285,44 @@ def build_server_binary(*, server_dir: Path, output_name: str) -> Path:
     else:
         print(f"[build] Warning: prompt_sets source directory not found at {prompt_sets_src}")
 
-    # Download and bundle ripgrep binary
+    # Download and bundle ripgrep binary for production search.
+    # If bundling fails or the binary doesn't match the build host arch,
+    # the runtime self-heal will download the correct one to ~/.xeditor/bin/.
     try:
         rg_binary = _download_ripgrep_binary(server_dir, build_dir)
         if rg_binary and rg_binary.exists():
-            # Copy rg binary to distribution directory (same location as executable)
             dest_rg = produced_dist / rg_binary.name
             shutil.copy2(rg_binary, dest_rg)
-            # Ensure executable permissions
             if sys.platform != "win32":
                 os.chmod(dest_rg, 0o755)
             print(f"[build] Bundled ripgrep binary: {dest_rg}")
+
+            # Validate bundled rg runs on this host (best-effort)
+            try:
+                result = subprocess.run(
+                    [str(dest_rg), "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if result.returncode == 0:
+                    print(f"[build] Ripgrep validation OK: {result.stdout.strip()}")
+                else:
+                    print(f"[build] Warning: bundled rg exited with {result.returncode}. "
+                          "Runtime will auto-download correct binary if needed.")
+            except OSError as e:
+                if hasattr(e, "errno") and e.errno == 8:  # ENOEXEC — wrong arch
+                    print("[build] Warning: bundled rg has wrong architecture for build host. "
+                          "Runtime will auto-download correct binary on first search.")
+                else:
+                    print(f"[build] Warning: bundled rg failed to execute: {e}. "
+                          "Runtime will auto-download correct binary if needed.")
         else:
-            print(f"[build] Warning: Could not download ripgrep binary, will rely on system PATH or Python fallback")
+            print("[build] Warning: could not download ripgrep. "
+                  "Runtime will auto-download on first search.")
     except Exception as e:
-        print(f"[build] Warning: Failed to bundle ripgrep: {e}")
-        print(f"[build] The application will use Python regex fallback if ripgrep is not in PATH")
+        print(f"[build] Warning: ripgrep bundling failed: {e}. "
+              "Runtime will auto-download on first search.")
 
     return produced_dist
 

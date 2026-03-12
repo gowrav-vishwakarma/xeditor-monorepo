@@ -3,8 +3,10 @@ Tool Executor for XEditor Local Companion.
 Handles execution of AI agent tools like read_file, write_file, search_code, etc.
 """
 
+import errno
 import os
 import re
+import ssl
 import subprocess
 import asyncio
 import hashlib
@@ -19,6 +21,7 @@ from typing import Dict, Any, Optional, List, Callable, Awaitable
 from dataclasses import dataclass
 from datetime import datetime
 
+from apps.code_editor.filesystem import get_xeditor_data_path
 from apps.code_editor.indexing_builder import handle_retrieve_chunks
 from apps.code_editor.project import get_project_manager, sanitize_project_name
 from apps.code_editor.file_events import (
@@ -33,6 +36,9 @@ _approved_commands: set[str] = set()
 # Store pending commands awaiting confirmation: hash -> {command, args, cwd, timeout, project_id, chat_id}
 _pending_commands: Dict[str, Dict[str, Any]] = {}
 
+# Cached resolved rg path to avoid re-validation on every search
+_rg_binary_cache: Optional[str] = None
+
 
 def _get_ripgrep_platform_info() -> tuple[str, str, str]:
     """
@@ -46,6 +52,8 @@ def _get_ripgrep_platform_info() -> tuple[str, str, str]:
         machine = platform_module.machine().lower()
         if machine in ("x86_64", "amd64"):
             return ("x86_64-unknown-linux-musl", "tar.gz", "rg")
+        elif machine in ("aarch64", "arm64"):
+            return ("aarch64-unknown-linux-gnu", "tar.gz", "rg")
         elif machine.startswith("arm"):
             return ("arm-unknown-linux-gnueabihf", "tar.gz", "rg")
         else:
@@ -65,6 +73,143 @@ def _get_ripgrep_platform_info() -> tuple[str, str, str]:
             return ("x86_64-pc-windows-msvc", "zip", "rg.exe")
     else:
         raise RuntimeError(f"Unsupported platform: {sys.platform}")
+
+
+def _validate_rg_binary(path: str) -> bool:
+    """
+    Verify that the ripgrep binary at path is executable on this system.
+    Returns False if file missing, not executable, wrong arch (ENOEXEC), or --version fails.
+    """
+    p = Path(path)
+    if not p.exists() or not p.is_file():
+        return False
+    if sys.platform != "win32" and not os.access(p, os.X_OK):
+        return False
+    try:
+        result = subprocess.run(
+            [str(p), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except OSError as e:
+        if getattr(e, "errno", None) == errno.ENOEXEC:
+            return False  # Wrong architecture
+        raise
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def _get_rg_cache_dir() -> Path:
+    """Return ~/.xeditor/bin/ for cached ripgrep binary (no sudo needed)."""
+    cache_dir = Path(get_xeditor_data_path()) / "bin"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def _build_ssl_context() -> ssl.SSLContext:
+    """Build an SSL context that works in Nuitka standalone builds."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        pass
+    ctx = ssl.create_default_context()
+    try:
+        ctx.load_default_certs()
+    except Exception:
+        pass
+    return ctx
+
+
+def _download_url(url: str, dest: Path) -> None:
+    """Download a URL to a file, handling SSL and redirects."""
+    ctx = _build_ssl_context()
+    req = urllib.request.Request(url, headers={"User-Agent": "XEditor/1.0"})
+    with urllib.request.urlopen(req, context=ctx, timeout=60) as resp:
+        with open(dest, "wb") as f:
+            shutil.copyfileobj(resp, f)
+
+
+def _download_rg_to_cache() -> Optional[str]:
+    """
+    Download ripgrep binary for current runtime platform into ~/.xeditor/bin/.
+    Returns path to rg if successful and validated, None otherwise.
+    """
+    ripgrep_version = "15.1.0"
+    platform_name, archive_ext, binary_name = _get_ripgrep_platform_info()
+    archive_name = f"ripgrep-{ripgrep_version}-{platform_name}.{archive_ext}"
+    url = f"https://github.com/BurntSushi/ripgrep/releases/download/{ripgrep_version}/{archive_name}"
+
+    cache_dir = _get_rg_cache_dir()
+    binary_path = cache_dir / binary_name
+    archive_path = cache_dir / archive_name
+
+    print(f"[rg] Downloading ripgrep {ripgrep_version} for {platform_name}...")
+    print(f"[rg] URL: {url}")
+    print(f"[rg] Target: {cache_dir}")
+
+    try:
+        _download_url(url, archive_path)
+        print(f"[rg] Downloaded {archive_name}")
+
+        if archive_ext == "zip":
+            with zipfile.ZipFile(archive_path, "r") as zip_ref:
+                for member in zip_ref.namelist():
+                    if member.endswith(binary_name) and not member.endswith("/"):
+                        zip_ref.extract(member, cache_dir)
+                        extracted = cache_dir / member
+                        if extracted.exists() and extracted != binary_path:
+                            if binary_path.exists():
+                                binary_path.unlink()
+                            extracted.rename(binary_path)
+                        else:
+                            for nested in cache_dir.rglob(binary_name):
+                                if nested.is_file() and nested != binary_path:
+                                    if binary_path.exists():
+                                        binary_path.unlink()
+                                    nested.rename(binary_path)
+                                    break
+                        break
+        else:
+            with tarfile.open(archive_path, "r:gz") as tar_ref:
+                for member in tar_ref.getmembers():
+                    if member.name.endswith(binary_name) and member.isfile():
+                        tar_ref.extract(member, cache_dir)
+                        extracted = cache_dir / member.name
+                        if extracted.exists() and extracted != binary_path:
+                            if binary_path.exists():
+                                binary_path.unlink()
+                            extracted.rename(binary_path)
+                        else:
+                            for nested in cache_dir.rglob(binary_name):
+                                if nested.is_file() and nested != binary_path:
+                                    if binary_path.exists():
+                                        binary_path.unlink()
+                                    nested.rename(binary_path)
+                                    break
+                        break
+
+        archive_path.unlink(missing_ok=True)
+        for d in cache_dir.iterdir():
+            if d.is_dir() and d.name.startswith("ripgrep-"):
+                shutil.rmtree(d, ignore_errors=True)
+        if sys.platform != "win32":
+            os.chmod(binary_path, 0o755)
+
+        if _validate_rg_binary(str(binary_path)):
+            print(f"[rg] Successfully installed ripgrep to {binary_path}")
+            return str(binary_path)
+
+        print(f"[rg] Downloaded binary failed validation, removing")
+        binary_path.unlink(missing_ok=True)
+        return None
+    except Exception as e:
+        print(f"[rg] Failed to download ripgrep: {e}")
+        archive_path.unlink(missing_ok=True)
+        binary_path.unlink(missing_ok=True)
+        return None
 
 
 def _is_dev_mode() -> bool:
@@ -202,69 +347,62 @@ def _download_ripgrep_for_dev() -> Optional[str]:
 
 def _find_ripgrep_binary(auto_download: bool = False) -> Optional[str]:
     """
-    Find ripgrep binary, checking bundled location first, then dev bin directory, then system PATH.
-    Optionally downloads ripgrep for dev mode if not found.
-    
-    Args:
-        auto_download: If True and in dev mode, attempt to download ripgrep if not found.
-    
-    Returns:
-        Path to rg binary if found, None otherwise.
+    Find ripgrep binary. Resolution order differs by mode:
+    - Production: bundled (validated) -> cache (~/.xeditor/bin) -> download to cache -> None
+    - Development: bundled -> server/bin -> PATH -> download to server/bin -> None (caller may fallback)
     """
-    # Check for bundled rg binary (in same directory as executable)
+    global _rg_binary_cache
+    if _rg_binary_cache is not None and Path(_rg_binary_cache).exists():
+        return _rg_binary_cache
+
+    def _set_cache(path: str) -> str:
+        global _rg_binary_cache
+        _rg_binary_cache = path
+        return path
+
+    rg_name = "rg.exe" if sys.platform == "win32" else "rg"
+
+    # Bundled rg (next to executable)
     try:
-        # Get directory of executable (works for both bundled and dev)
-        if sys.platform == "win32":
-            # On Windows, bundled binary would be rg.exe
-            # sys.argv[0] might be relative, resolve it
-            exe_dir = Path(sys.argv[0]).resolve().parent
-            bundled_rg = exe_dir / "rg.exe"
-        else:
-            # On Unix-like systems, bundled binary would be rg
-            exe_dir = Path(sys.argv[0]).resolve().parent
-            bundled_rg = exe_dir / "rg"
-        
+        exe_dir = Path(sys.argv[0]).resolve().parent
+        bundled_rg = exe_dir / rg_name
         if bundled_rg.exists() and bundled_rg.is_file():
-            # Check if it's executable (on Unix-like systems)
-            if sys.platform == "win32" or os.access(bundled_rg, os.X_OK):
-                return str(bundled_rg)
-    except (OSError, ValueError):
-        # sys.argv[0] might not be resolvable in some edge cases
-        pass
-    
-    # Check for dev-mode rg binary (in server/bin directory)
-    try:
-        # Try to find server directory relative to this file
-        # __file__ = server/apps/code_editor/tools/executor.py
-        # .parent = server/apps/code_editor/tools/
-        # .parent.parent = server/apps/code_editor/
-        # .parent.parent.parent = server/apps/
-        # .parent.parent.parent.parent = server/
-        server_dir = Path(__file__).resolve().parent.parent.parent.parent
-        dev_bin_dir = server_dir / "bin"
-        if sys.platform == "win32":
-            dev_rg = dev_bin_dir / "rg.exe"
-        else:
-            dev_rg = dev_bin_dir / "rg"
-        
-        if dev_rg.exists() and dev_rg.is_file():
-            # Check if it's executable (on Unix-like systems)
-            if sys.platform == "win32" or os.access(dev_rg, os.X_OK):
-                return str(dev_rg)
+            if _validate_rg_binary(str(bundled_rg)):
+                return _set_cache(str(bundled_rg))
+            print(f"[rg] Bundled rg at {bundled_rg} failed validation (wrong arch?), skipping")
     except (OSError, ValueError):
         pass
-    
-    # Fall back to system PATH
-    rg_path = shutil.which("rg")
-    if rg_path:
-        return rg_path
-    
-    # Auto-download for dev mode if requested and not found
-    if auto_download and _is_dev_mode():
-        downloaded_path = _download_ripgrep_for_dev()
-        if downloaded_path:
-            return downloaded_path
-    
+
+    if _is_dev_mode():
+        # Dev: server/bin
+        try:
+            server_dir = Path(__file__).resolve().parent.parent.parent.parent
+            dev_rg = server_dir / "bin" / rg_name
+            if dev_rg.exists() and dev_rg.is_file() and _validate_rg_binary(str(dev_rg)):
+                return _set_cache(str(dev_rg))
+        except (OSError, ValueError):
+            pass
+        # Dev: system PATH
+        rg_path = shutil.which("rg")
+        if rg_path and _validate_rg_binary(rg_path):
+            return _set_cache(rg_path)
+        # Dev: auto-download to server/bin
+        if auto_download:
+            downloaded = _download_ripgrep_for_dev()
+            if downloaded and _validate_rg_binary(downloaded):
+                return _set_cache(downloaded)
+    else:
+        # Production: check cache (~/.xeditor/bin)
+        cached_rg = _get_rg_cache_dir() / rg_name
+        if cached_rg.exists() and cached_rg.is_file() and _validate_rg_binary(str(cached_rg)):
+            return _set_cache(str(cached_rg))
+        # Production: auto-download to cache
+        if auto_download:
+            print("[rg] No valid ripgrep found, attempting auto-download...")
+            downloaded = _download_rg_to_cache()
+            if downloaded:
+                return _set_cache(downloaded)
+
     return None
 
 
@@ -1083,12 +1221,17 @@ class ToolExecutor:
 
         search_dir = self.resolve_path(search_path)
 
-        # Find ripgrep binary (bundled first, then system PATH)
-        rg_binary = _find_ripgrep_binary()
-        
+        # Find ripgrep binary (bundled -> cache -> download in prod; bundled -> bin -> PATH -> download in dev)
+        rg_binary = _find_ripgrep_binary(auto_download=True)
+
         if not rg_binary:
-            # No ripgrep available, use Python regex fallback
-            return await self._regex_search(query, search_dir)
+            if _is_dev_mode():
+                return await self._regex_search(query, search_dir)
+            return ToolResult(
+                success=False,
+                error="Code search unavailable: ripgrep binary not found and could not be downloaded. "
+                "Check internet connection or reinstall the application.",
+            )
 
         try:
             # Use ripgrep for fast searching
