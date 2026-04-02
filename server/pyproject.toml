@@ -35,8 +35,8 @@ gpu = [
 ]
 # Video Editor generation dependencies
 video_editor = [
-    # TTS
-    "TTS>=0.22.0",
+    # TTS (F5-TTS replaces abandoned Coqui TTS)
+    "f5-tts>=1.0.0",
     # Image/Video generation
     "diffusers>=0.29.0",
     "transformers>=4.40.0",

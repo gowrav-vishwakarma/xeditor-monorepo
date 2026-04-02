@@ -384,6 +384,10 @@ class JobQueue:
             raise RuntimeError("No generator ID specified")
 
         gen_class = registry.get_generator_class(gid)
+        if not gen_class and fallback_id and gid != fallback_id:
+            log.warning("[resolve] Generator '%s' not found, falling back to '%s'", gid, fallback_id)
+            gid = fallback_id
+            gen_class = registry.get_generator_class(gid)
         if not gen_class:
             available = [g.id for g in registry.list_generators()]
             raise RuntimeError(

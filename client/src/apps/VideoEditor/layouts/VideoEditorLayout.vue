@@ -119,7 +119,7 @@
 </template>
 
 <script setup lang="ts">
-import { watch } from 'vue';
+import { watch, onMounted, onUnmounted } from 'vue';
 import { useVideoProjectStore, useVideoWorkspaceStore } from '../stores';
 import { useVideoCompanionStore } from '../stores/videoCompanion';
 import type { WorkspaceMode } from '../stores/videoWorkspace';
@@ -155,6 +155,21 @@ async function saveProject(): Promise<void> {
   }
 }
 
+function onBeforeUnload(e: BeforeUnloadEvent): void {
+  if (projectStore.isDirty) {
+    e.preventDefault();
+    void projectStore.saveProject();
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', onBeforeUnload);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', onBeforeUnload);
+});
+
 let recentProjectsLoaded = false;
 let isLoadingRecentProjects = false;
 
@@ -174,6 +189,10 @@ async function loadRecentProjectsWhenReady(): Promise<void> {
     if (companionStore.isConnected) {
       await projectStore.loadRecentProjects();
       recentProjectsLoaded = true;
+
+      if (!projectStore.isOpen) {
+        await projectStore.restoreLastProject();
+      }
     }
   } catch (e) {
     console.error('Failed to load recent projects:', e);

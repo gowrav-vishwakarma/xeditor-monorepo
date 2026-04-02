@@ -29,9 +29,8 @@ import {
   createDefaultTimeline,
 } from '../types';
 
-// Debounce delay for autosave (ms)
-// Set to 5 minutes to reduce server load while still providing regular saves
-const AUTOSAVE_DELAY_MS = 5 * 60 * 1000; // 5 minutes
+const AUTOSAVE_DELAY_MS = 5 * 60 * 1000;
+const VE_PROJECT_PATH_KEY = 've_last_project_path';
 
 export const useVideoProjectStore = defineStore('videoProject', () => {
   const companion = useVideoCompanionStore();
@@ -88,6 +87,28 @@ export const useVideoProjectStore = defineStore('videoProject', () => {
   }
 
   // ─────────────────────────────────────────────────────────────────────
+  // Project Path Persistence
+  // ─────────────────────────────────────────────────────────────────────
+
+  function _persistProjectPath(rootPath: string | undefined): void {
+    if (rootPath) {
+      localStorage.setItem(VE_PROJECT_PATH_KEY, rootPath);
+    }
+  }
+
+  async function restoreLastProject(): Promise<boolean> {
+    const savedPath = localStorage.getItem(VE_PROJECT_PATH_KEY);
+    if (!savedPath) return false;
+    try {
+      await openProject(savedPath);
+      return true;
+    } catch {
+      localStorage.removeItem(VE_PROJECT_PATH_KEY);
+      return false;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
   // Project Operations
   // ─────────────────────────────────────────────────────────────────────
 
@@ -116,6 +137,7 @@ export const useVideoProjectStore = defineStore('videoProject', () => {
       if (response.success && response.project) {
         project.value = response.project;
         isDirty.value = false;
+        _persistProjectPath(response.project.root_path);
         await loadRecentProjects();
       } else {
         throw new Error(response.error || 'Failed to create project');
@@ -145,6 +167,7 @@ export const useVideoProjectStore = defineStore('videoProject', () => {
       if (response.success && response.project) {
         project.value = response.project;
         isDirty.value = false;
+        _persistProjectPath(response.project.root_path);
         await loadRecentProjects();
       } else {
         throw new Error(response.error || 'Failed to open project');
@@ -287,6 +310,7 @@ export const useVideoProjectStore = defineStore('videoProject', () => {
     } finally {
       project.value = null;
       isDirty.value = false;
+      localStorage.removeItem(VE_PROJECT_PATH_KEY);
     }
   }
 
@@ -727,6 +751,7 @@ export const useVideoProjectStore = defineStore('videoProject', () => {
     closeProject,
     loadRecentProjects,
     checkFolder,
+    restoreLastProject,
 
     // Settings
     updateSettings,

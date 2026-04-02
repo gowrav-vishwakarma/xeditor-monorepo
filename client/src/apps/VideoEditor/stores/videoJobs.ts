@@ -455,7 +455,7 @@ export const useVideoJobsStore = defineStore('videoJobs', () => {
   }): Promise<string> {
     return startJob('tts_generate', {
       clipIds: options?.clipIds || [],
-      generatorId: options?.generatorId || 'tts_coqui_xtts',
+      generatorId: options?.generatorId || 'tts_f5',
       ...(options?.generatorConfig && { generatorConfig: options.generatorConfig }),
     });
   }
