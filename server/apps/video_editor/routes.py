@@ -90,12 +90,9 @@ async def init_video_editor() -> None:
     except ImportError as e:
         print(f"[video_editor] Skipping StoryLLMGenerator: {e}")
     
-    try:
-        from apps.video_editor.generators.impl.tts_coqui_xtts import CoquiXTTSGenerator
-        generators_to_register.append(CoquiXTTSGenerator)
-        print("[video_editor] Registered: CoquiXTTSGenerator")
-    except ImportError as e:
-        print(f"[video_editor] Skipping CoquiXTTSGenerator: {e}")
+    # Coqui XTTS is abandoned and incompatible with modern transformers/huggingface_hub.
+    # Use F5-TTS instead.
+    print("[video_editor] Skipping CoquiXTTSGenerator (deprecated, use F5-TTS)")
     
     try:
         from apps.video_editor.generators.impl.t2i_sdxl import SDXLT2IGenerator

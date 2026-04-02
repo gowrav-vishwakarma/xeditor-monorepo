@@ -547,7 +547,7 @@ class JobQueue:
         project = self._get_project(queued.project_id)
 
         log.info("[tts] Resolving TTS generator (requested=%s)", job.generator_id)
-        gen = self._resolve_generator(job.generator_id, job.generator_config, "tts_coqui_xtts")
+        gen = self._resolve_generator(job.generator_id, job.generator_config, "tts_f5")
 
         log.info("[tts] Loading model...")
         await self._broadcast_progress(queued, JobProgressEvent(
