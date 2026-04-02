@@ -438,6 +438,22 @@ export const useVideoProjectStore = defineStore('videoProject', () => {
     scheduleAutosave();
   }
 
+  function removeProduct(id: string): void {
+    if (!project.value) return;
+    project.value.library.products = project.value.library.products.filter(
+      (p) => p.id !== id,
+    );
+    scheduleAutosave();
+  }
+
+  function removeVoice(id: string): void {
+    if (!project.value) return;
+    project.value.library.voices = project.value.library.voices.filter(
+      (v) => v.id !== id,
+    );
+    scheduleAutosave();
+  }
+
   // ─────────────────────────────────────────────────────────────────────
   // Story Management
   // ─────────────────────────────────────────────────────────────────────
@@ -721,7 +737,9 @@ export const useVideoProjectStore = defineStore('videoProject', () => {
     updateCharacter,
     removeCharacter,
     addProduct,
+    removeProduct,
     addVoice,
+    removeVoice,
 
     // Story
     updateStory,

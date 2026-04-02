@@ -135,9 +135,10 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { useVideoProjectStore } from '../stores';
+import { useVideoProjectStore, useVideoWorkspaceStore } from '../stores';
 
 const projectStore = useVideoProjectStore();
+const workspace = useVideoWorkspaceStore();
 
 const library = computed(() => projectStore.library);
 
@@ -149,8 +150,19 @@ const expandedSections = ref({
 });
 
 function selectAsset(type: string, id: string): void {
-  console.log('Selected asset:', type, id);
-  // TODO: Emit selection event for properties panel
+  switch (type) {
+    case 'character':
+      workspace.selectCharacter(id);
+      workspace.setMode('characters');
+      break;
+    case 'prop':
+      workspace.selectProduct(id);
+      break;
+    case 'voice':
+      workspace.selectVoice(id);
+      workspace.setMode('voices');
+      break;
+  }
 }
 
 function addCharacter(): void {
@@ -163,12 +175,7 @@ function addCharacter(): void {
 }
 
 function addProp(): void {
-  const name = prompt('Prop name:');
-  if (!name) return;
-  const code = prompt('Prop code:');
-  if (!code) return;
-
-  projectStore.addProduct({ name, code });
+  workspace.setMode('characters');
 }
 
 function addVoice(): void {

@@ -529,9 +529,44 @@ class JobQueue:
                 full_text = " ".join(texts)
                 output_path = str(assets_dir / f"{clip.id}.wav")
 
-                # Find voice sample
+                # Resolve voice sample: line voice_override > character voice_id > character voice_sample_path > scene first character
                 voice_sample = None
-                if clip.scene_id:
+                first_line_id = clip.script_line_ids[0] if clip.script_line_ids else None
+                matched_line = None
+                if first_line_id:
+                    for scene in project.story.scenes:
+                        for line in scene.script_lines:
+                            if line.id == first_line_id:
+                                matched_line = line
+                                break
+                        if matched_line:
+                            break
+
+                if matched_line and matched_line.voice_override:
+                    voice_asset = next(
+                        (v for v in project.library.voices if v.id == matched_line.voice_override),
+                        None,
+                    )
+                    if voice_asset and voice_asset.sample_path:
+                        voice_sample = str(Path(project.root_path or "") / voice_asset.sample_path)
+
+                if not voice_sample and matched_line and matched_line.character_id:
+                    char = next(
+                        (c for c in project.library.characters if c.id == matched_line.character_id),
+                        None,
+                    )
+                    if char:
+                        if char.voice_id:
+                            voice_asset = next(
+                                (v for v in project.library.voices if v.id == char.voice_id),
+                                None,
+                            )
+                            if voice_asset and voice_asset.sample_path:
+                                voice_sample = str(Path(project.root_path or "") / voice_asset.sample_path)
+                        elif char.voice_sample_path:
+                            voice_sample = str(Path(project.root_path or "") / char.voice_sample_path)
+
+                if not voice_sample and clip.scene_id:
                     scene = next((s for s in project.story.scenes if s.id == clip.scene_id), None)
                     if scene and scene.character_ids:
                         char = next(
@@ -961,10 +996,13 @@ class JobQueue:
             key=lambda c: c.start_time,
         )
 
-        # Gather all audio clips in timeline order
+        # Gather all audio clips (dialog, music, sfx) -- skip muted tracks
+        muted_track_ids = {t.id for t in project.timeline.tracks if t.muted}
         audio_clips = sorted(
             [c for c in project.timeline.clips
-             if c.audio_artifact_path and (c.track_id.startswith("audio") or c.track_id.startswith("music"))],
+             if c.audio_artifact_path
+             and c.track_id not in muted_track_ids
+             and not c.track_id.startswith("video")],
             key=lambda c: c.start_time,
         )
 
@@ -973,7 +1011,7 @@ class JobQueue:
 
         root = Path(project.root_path or "")
 
-        # Build FFmpeg concat file
+        # Build FFmpeg concat file for video
         concat_file = renders_dir / f"concat_{job.id}.txt"
         with open(concat_file, "w") as f:
             for clip in video_clips:
@@ -981,7 +1019,6 @@ class JobQueue:
                 if video_path.exists():
                     f.write(f"file '{video_path}'\n")
 
-        # Run FFmpeg
         import subprocess
 
         cmd = [
@@ -990,15 +1027,42 @@ class JobQueue:
             "-i", str(concat_file),
         ]
 
-        # Add audio tracks
+        # Add audio inputs with per-clip volume/fade filters
         audio_inputs = []
-        for ac in audio_clips:
+        filter_parts = []
+        for idx, ac in enumerate(audio_clips):
             audio_path = root / ac.audio_artifact_path
-            if audio_path.exists():
-                cmd.extend(["-i", str(audio_path)])
-                audio_inputs.append(ac)
+            if not audio_path.exists():
+                continue
+            cmd.extend(["-i", str(audio_path)])
+            audio_inputs.append(ac)
 
-        # Output settings
+            input_idx = idx + 1  # 0 is video concat
+            filters = []
+            vol = ac.volume if ac.volume is not None else 1.0
+            if vol != 1.0:
+                filters.append(f"volume={vol}")
+            if ac.fade_in_seconds and ac.fade_in_seconds > 0:
+                filters.append(f"afade=t=in:st=0:d={ac.fade_in_seconds}")
+            if ac.fade_out_seconds and ac.fade_out_seconds > 0:
+                filters.append(f"afade=t=out:st={max(0, ac.duration - ac.fade_out_seconds)}:d={ac.fade_out_seconds}")
+
+            if filters:
+                filter_chain = ",".join(filters)
+                filter_parts.append(f"[{input_idx}:a]{filter_chain}[a{idx}]")
+            else:
+                filter_parts.append(f"[{input_idx}:a]acopy[a{idx}]")
+
+        # If multiple audio streams, mix them down
+        if len(audio_inputs) > 1:
+            mix_inputs = "".join(f"[a{i}]" for i in range(len(audio_inputs)))
+            filter_parts.append(f"{mix_inputs}amix=inputs={len(audio_inputs)}:duration=longest[aout]")
+            filter_str = ";".join(filter_parts)
+            cmd.extend(["-filter_complex", filter_str, "-map", "0:v", "-map", "[aout]"])
+        elif len(audio_inputs) == 1:
+            filter_str = ";".join(filter_parts)
+            cmd.extend(["-filter_complex", filter_str, "-map", "0:v", "-map", "[a0]"])
+
         cmd.extend([
             "-c:v", "libx264",
             "-preset", "medium",

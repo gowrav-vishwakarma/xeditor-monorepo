@@ -1,7 +1,7 @@
 <template>
   <div class="timeline-editor">
-    <div class="row items-center q-mb-md">
-      <div class="text-h5">Timeline</div>
+    <div class="row items-center q-px-sm q-py-xs">
+      <div class="text-subtitle1">Timeline</div>
       <q-space />
       <q-btn-toggle
         v-model="viewMode"
@@ -9,15 +9,18 @@
           { label: 'Script', value: 'script' },
           { label: 'Video', value: 'video' },
         ]"
+        dense
+        no-caps
+        size="sm"
         color="primary"
         toggle-color="primary"
       />
-      <q-btn flat icon="zoom_out" class="q-ml-md" @click="zoomOut" />
-      <q-btn flat icon="zoom_in" @click="zoomIn" />
+      <q-btn flat dense icon="zoom_out" size="sm" class="q-ml-sm" @click="zoomOut" />
+      <q-btn flat dense icon="zoom_in" size="sm" @click="zoomIn" />
     </div>
 
     <!-- Timeline Header -->
-    <div class="timeline-header bg-grey-3 q-pa-sm">
+    <div class="timeline-header bg-grey-3 q-pa-xs">
       <div class="row items-center">
         <div class="track-label">Tracks</div>
         <div class="timeline-ruler">
@@ -35,22 +38,22 @@
 
     <!-- Timeline Tracks -->
     <div class="timeline-tracks">
-      <div v-for="track in timeline.tracks" :key="track.id" class="timeline-track">
+      <div v-for="track in timeline.tracks" :key="track.id" class="timeline-track" :style="{ minHeight: `${track.height}px` }">
         <div class="track-header bg-grey-2">
-          <q-icon :name="track.type === 'video' ? 'videocam' : 'audiotrack'" class="q-mr-sm" />
-          {{ track.name }}
+          <q-icon :name="trackIcon(track.type)" size="16px" class="q-mr-xs" />
+          <span class="text-caption">{{ track.name }}</span>
           <q-space />
           <q-btn
             flat
             round
-            size="sm"
+            size="xs"
             :icon="track.muted ? 'volume_off' : 'volume_up'"
             @click="toggleMute(track)"
           />
           <q-btn
             flat
             round
-            size="sm"
+            size="xs"
             :icon="track.locked ? 'lock' : 'lock_open'"
             @click="toggleLock(track)"
           />
@@ -60,18 +63,34 @@
             v-for="clip in getTrackClips(track.id)"
             :key="clip.id"
             class="timeline-clip"
-            :class="[`status-${clip.status}`, { selected: selectedClipId === clip.id }]"
+            :class="[
+              `status-${clip.status}`,
+              `track-${track.type}`,
+              { selected: selectedClipId === clip.id },
+            ]"
             :style="getClipStyle(clip)"
             @click.stop="selectClip(clip.id)"
           >
             <div class="clip-content">
-              <q-icon v-if="clip.status === 'generating'" name="sync" class="rotating" />
-              <q-icon v-else-if="clip.status === 'done'" name="check" color="positive" />
-              <q-icon v-else-if="clip.status === 'error'" name="error" color="negative" />
-              <span class="clip-label">{{ getClipLabel(clip) }}</span>
+              <q-icon v-if="clip.status === 'generating'" name="sync" class="rotating" size="12px" />
+              <q-icon v-else-if="clip.status === 'done'" name="check" color="positive" size="12px" />
+              <q-icon v-else-if="clip.status === 'error'" name="error" color="negative" size="12px" />
+              <span class="clip-label">
+                <template v-if="viewMode === 'script' && clip.script_line_ids.length > 0">
+                  {{ getScriptTextForClip(clip) }}
+                </template>
+                <template v-else>
+                  {{ getClipLabel(clip) }}
+                </template>
+              </span>
             </div>
             <div v-if="isClipStale(clip)" class="stale-indicator">
               <q-icon name="warning" color="warning" size="xs" />
+            </div>
+            <!-- Volume indicator for audio clips -->
+            <div v-if="clip.volume !== undefined && clip.volume < 1" class="volume-indicator">
+              <q-icon name="volume_down" size="10px" />
+              {{ Math.round((clip.volume ?? 1) * 100) }}%
             </div>
           </div>
         </div>
@@ -79,59 +98,51 @@
     </div>
 
     <!-- Timeline Controls -->
-    <div class="timeline-controls bg-grey-2 q-pa-sm">
+    <div class="timeline-controls bg-grey-2 q-pa-xs">
       <div class="row items-center">
-        <q-btn flat round icon="skip_previous" />
-        <q-btn flat round icon="play_arrow" />
-        <q-btn flat round icon="skip_next" />
-        <q-separator vertical class="q-mx-sm" />
-        <span class="text-body2"
-          >{{ formatTime(currentTime) }} / {{ formatTime(timeline.total_duration) }}</span
-        >
+        <q-btn flat round size="sm" icon="skip_previous" />
+        <q-btn flat round size="sm" icon="play_arrow" />
+        <q-btn flat round size="sm" icon="skip_next" />
+        <q-separator vertical class="q-mx-xs" />
+        <span class="text-caption">{{ formatTime(currentTime) }} / {{ formatTime(timeline.total_duration) }}</span>
         <q-space />
         <q-btn
           flat
+          dense
+          size="sm"
           icon="delete_sweep"
-          label="Clear All"
+          label="Clear"
           color="negative"
           :disable="timeline.clips.length === 0"
           @click="clearAllClips"
         />
-        <q-btn flat icon="add" label="Add Clips from Scenes" @click="addClipFromScene" />
-        <q-btn-dropdown flat icon="auto_awesome" label="Generate" color="primary">
-          <q-list>
-            <q-item clickable v-close-popup @click="generateAll">
-              <q-item-section avatar>
-                <q-icon name="record_voice_over" />
-              </q-item-section>
+        <q-btn flat dense size="sm" icon="add" label="Add from Scenes" @click="addClipFromScene" />
+        <q-btn-dropdown flat dense size="sm" icon="auto_awesome" label="Generate" color="primary">
+          <q-list dense>
+            <q-item clickable v-close-popup @click="generateAllAudio">
+              <q-item-section avatar><q-icon name="record_voice_over" /></q-item-section>
               <q-item-section>
                 <q-item-label>Generate Audio (TTS)</q-item-label>
-                <q-item-label caption>Create speech from narration</q-item-label>
+                <q-item-label caption>Create speech from dialog</q-item-label>
               </q-item-section>
             </q-item>
             <q-item clickable v-close-popup @click="generateImages">
-              <q-item-section avatar>
-                <q-icon name="image" />
-              </q-item-section>
+              <q-item-section avatar><q-icon name="image" /></q-item-section>
               <q-item-section>
                 <q-item-label>Generate Images</q-item-label>
-                <q-item-label caption>Create visuals from prompts</q-item-label>
+                <q-item-label caption>Create keyframes from prompts</q-item-label>
               </q-item-section>
             </q-item>
             <q-item clickable v-close-popup @click="generateVideos">
-              <q-item-section avatar>
-                <q-icon name="movie" />
-              </q-item-section>
+              <q-item-section avatar><q-icon name="movie" /></q-item-section>
               <q-item-section>
                 <q-item-label>Generate Videos</q-item-label>
-                <q-item-label caption>Create video clips from images</q-item-label>
+                <q-item-label caption>Create video clips</q-item-label>
               </q-item-section>
             </q-item>
             <q-separator />
             <q-item clickable v-close-popup @click="exportVideo">
-              <q-item-section avatar>
-                <q-icon name="file_download" />
-              </q-item-section>
+              <q-item-section avatar><q-icon name="file_download" /></q-item-section>
               <q-item-section>
                 <q-item-label>Export Final Video</q-item-label>
                 <q-item-label caption>Merge all clips to MP4</q-item-label>
@@ -146,12 +157,13 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { useVideoProjectStore, useVideoJobsStore } from '../stores';
-import type { TimelineClip, TimelineTrack } from '../types';
+import { useVideoProjectStore, useVideoJobsStore, useVideoWorkspaceStore } from '../stores';
+import type { TimelineClip, TimelineTrack, TrackType } from '../types';
 import { isClipAudioStale, isClipVideoStale } from '../types';
 
 const projectStore = useVideoProjectStore();
 const jobsStore = useVideoJobsStore();
+const workspace = useVideoWorkspaceStore();
 
 const timeline = computed(() => projectStore.timeline);
 const story = computed(() => projectStore.story);
@@ -159,20 +171,30 @@ const story = computed(() => projectStore.story);
 const viewMode = ref<'script' | 'video'>('script');
 const zoom = ref(1);
 const currentTime = ref(0);
-const selectedClipId = ref<string | null>(null);
+
+const selectedClipId = computed({
+  get: () => workspace.selectedClipId,
+  set: (val: string | null) => workspace.selectClip(val),
+});
+
+function trackIcon(type: TrackType): string {
+  switch (type) {
+    case 'video': return 'videocam';
+    case 'audio': return 'record_voice_over';
+    case 'music': return 'music_note';
+    case 'sfx': return 'surround_sound';
+    case 'overlay': return 'layers';
+    default: return 'audiotrack';
+  }
+}
 
 const timeMarkers = computed(() => {
   const duration = timeline.value.total_duration || 60;
   const markers = [];
   const step = duration > 300 ? 60 : duration > 60 ? 10 : 5;
-
   for (let t = 0; t <= duration; t += step) {
-    markers.push({
-      time: t,
-      position: (t / duration) * 100,
-    });
+    markers.push({ time: t, position: (t / duration) * 100 });
   }
-
   return markers;
 });
 
@@ -184,7 +206,6 @@ function getClipStyle(clip: TimelineClip): Record<string, string> {
   const duration = timeline.value.total_duration || 60;
   const left = (clip.start_time / duration) * 100;
   const width = (clip.duration / duration) * 100;
-
   return {
     left: `${left}%`,
     width: `${Math.max(width, 2)}%`,
@@ -194,9 +215,23 @@ function getClipStyle(clip: TimelineClip): Record<string, string> {
 function getClipLabel(clip: TimelineClip): string {
   if (clip.scene_id) {
     const scene = story.value.scenes.find((s) => s.id === clip.scene_id);
-    return scene?.title || `Scene`;
+    return scene?.title || 'Scene';
   }
-  return `Clip`;
+  return 'Clip';
+}
+
+function getScriptTextForClip(clip: TimelineClip): string {
+  if (!clip.script_line_ids.length || !clip.scene_id) return getClipLabel(clip);
+
+  const scene = story.value.scenes.find((s) => s.id === clip.scene_id);
+  if (!scene) return getClipLabel(clip);
+
+  const lines = scene.script_lines
+    .filter((l) => clip.script_line_ids.includes(l.id))
+    .map((l) => l.text)
+    .join(' ');
+
+  return lines || getClipLabel(clip);
 }
 
 function isClipStale(clip: TimelineClip): boolean {
@@ -207,9 +242,8 @@ function selectClip(clipId: string): void {
   selectedClipId.value = clipId;
 }
 
-function handleTrackClick(event: MouseEvent, track: TimelineTrack): void {
+function handleTrackClick(_event: MouseEvent, track: TimelineTrack): void {
   if (track.locked) return;
-  // TODO: Handle adding clip at clicked position
 }
 
 function toggleMute(track: TimelineTrack): void {
@@ -248,46 +282,62 @@ function addClipFromScene(): void {
     return;
   }
 
-  // Add clips for all scenes
   let startTime = timeline.value.total_duration;
   for (const scene of scenes) {
+    const duration = scene.duration_estimate || 5;
+
+    // Video clip
     projectStore.addClip({
       track_id: 'video_main',
       start_time: startTime,
-      duration: scene.duration_estimate || 5,
+      duration,
       source_type: 'placeholder',
       scene_id: scene.id,
       status: 'draft',
       script_line_ids: [],
     });
-    startTime += scene.duration_estimate || 5;
+
+    // Audio clip for dialog
+    if (scene.script_lines.length > 0) {
+      projectStore.addClip({
+        track_id: 'audio_dialog',
+        start_time: startTime,
+        duration,
+        source_type: 'generated_audio',
+        scene_id: scene.id,
+        status: 'draft',
+        script_line_ids: scene.script_lines.map((l) => l.id),
+        volume: 1.0,
+        fade_in_seconds: 0,
+        fade_out_seconds: 0,
+      });
+    }
+
+    startTime += duration;
   }
 }
 
-async function generateAll(): Promise<void> {
-  const clipIds = timeline.value.clips.map((c) => c.id);
-  if (clipIds.length === 0) {
-    alert('No clips on timeline');
+async function generateAllAudio(): Promise<void> {
+  const dialogClips = timeline.value.clips.filter((c) => c.track_id === 'audio_dialog');
+  if (dialogClips.length === 0) {
+    alert('No dialog clips on timeline. Add clips from scenes first.');
     return;
   }
-
   try {
-    // Start audio generation first (images and video can follow)
-    await jobsStore.generateAudio({ clipIds });
-    // Note: Subsequent steps (image, video) can be triggered via UI
-    // after audio completes, or wired into a full pipeline
+    await jobsStore.generateAudio({ clipIds: dialogClips.map((c) => c.id) });
   } catch (e) {
-    console.error('Failed to start generation:', e);
+    console.error('Failed to start audio generation:', e);
   }
 }
 
 async function generateImages(): Promise<void> {
-  const clipIds = timeline.value.clips.map((c) => c.id);
+  const clipIds = timeline.value.clips
+    .filter((c) => c.track_id === 'video_main')
+    .map((c) => c.id);
   if (clipIds.length === 0) {
-    alert('No clips on timeline');
+    alert('No video clips on timeline');
     return;
   }
-
   try {
     await jobsStore.generateImages({ clipIds });
   } catch (e) {
@@ -296,12 +346,13 @@ async function generateImages(): Promise<void> {
 }
 
 async function generateVideos(): Promise<void> {
-  const clipIds = timeline.value.clips.map((c) => c.id);
+  const clipIds = timeline.value.clips
+    .filter((c) => c.track_id === 'video_main')
+    .map((c) => c.id);
   if (clipIds.length === 0) {
-    alert('No clips on timeline');
+    alert('No video clips on timeline');
     return;
   }
-
   try {
     await jobsStore.generateVideo({ clipIds });
   } catch (e) {
@@ -338,7 +389,7 @@ async function exportVideo(): Promise<void> {
 .timeline-ruler {
   flex: 1;
   position: relative;
-  height: 24px;
+  height: 20px;
 }
 
 .time-marker {
@@ -357,16 +408,16 @@ async function exportVideo(): Promise<void> {
 .timeline-track {
   display: flex;
   border-bottom: 1px solid var(--q-grey-3);
-  min-height: 60px;
 }
 
 .track-header {
   width: 120px;
   flex-shrink: 0;
-  padding: 8px;
+  padding: 4px 8px;
   display: flex;
   align-items: center;
   border-right: 1px solid var(--q-grey-3);
+  font-size: 12px;
 }
 
 .track-content {
@@ -377,15 +428,13 @@ async function exportVideo(): Promise<void> {
 
 .timeline-clip {
   position: absolute;
-  top: 4px;
-  bottom: 4px;
+  top: 3px;
+  bottom: 3px;
   background: var(--q-primary);
-  border-radius: 4px;
+  border-radius: 3px;
   cursor: pointer;
   overflow: hidden;
-  transition:
-    transform 0.1s,
-    box-shadow 0.1s;
+  transition: transform 0.1s, box-shadow 0.1s;
 
   &:hover {
     transform: translateY(-1px);
@@ -396,35 +445,20 @@ async function exportVideo(): Promise<void> {
     box-shadow: 0 0 0 2px var(--q-primary);
   }
 
-  &.status-draft {
-    background: #e0e0e0;
-    color: #333333;
+  &.status-draft { background: #e0e0e0; color: #333; .clip-content { color: #333; } }
+  &.status-generating { background: var(--q-info); color: white; }
+  &.status-done { background: var(--q-positive); color: white; }
+  &.status-error { background: var(--q-negative); color: white; }
 
-    .clip-content {
-      color: #333333;
-    }
-  }
-
-  &.status-generating {
-    background: var(--q-info);
-    color: white;
-  }
-
-  &.status-done {
-    background: var(--q-positive);
-    color: white;
-  }
-
-  &.status-error {
-    background: var(--q-negative);
-    color: white;
-  }
+  &.track-audio { background: #7c4dff; &.status-draft { background: #d1c4e9; } &.status-done { background: #7c4dff; } }
+  &.track-music { background: #e91e63; &.status-draft { background: #f8bbd0; } &.status-done { background: #e91e63; } }
+  &.track-sfx { background: #009688; &.status-draft { background: #b2dfdb; } &.status-done { background: #009688; } }
 }
 
 .clip-content {
-  padding: 4px 8px;
+  padding: 2px 6px;
   color: inherit;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -434,13 +468,24 @@ async function exportVideo(): Promise<void> {
 }
 
 .clip-label {
-  margin-left: 4px;
+  margin-left: 3px;
 }
 
 .stale-indicator {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 1px;
+  right: 1px;
+}
+
+.volume-indicator {
+  position: absolute;
+  bottom: 1px;
+  right: 3px;
+  font-size: 9px;
+  opacity: 0.8;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .timeline-controls {
@@ -453,11 +498,7 @@ async function exportVideo(): Promise<void> {
 }
 
 @keyframes rotate {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

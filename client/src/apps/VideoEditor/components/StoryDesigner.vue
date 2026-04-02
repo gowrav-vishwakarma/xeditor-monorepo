@@ -1,5 +1,5 @@
 <template>
-  <div class="story-designer">
+  <div class="story-designer q-pa-md">
     <div class="row items-center q-mb-md">
       <div class="text-h5">Story Designer</div>
       <q-space />
@@ -52,7 +52,6 @@
     >
       <q-card flat bordered>
         <q-card-section>
-          <!-- LLM Generator UI Schema (rendered from server capabilities) -->
           <template v-if="storyLLMCapabilities">
             <GeneratorUiRenderer
               :schema="storyLLMCapabilities.ui_schema"
@@ -64,7 +63,6 @@
 
           <q-separator class="q-my-md" />
 
-          <!-- Script Parameters -->
           <div class="text-subtitle2 q-mb-sm">Script Parameters</div>
           <div class="row q-gutter-md">
             <q-input
@@ -91,7 +89,6 @@
 
           <q-separator class="q-my-md" />
 
-          <!-- Action Buttons -->
           <div class="row q-gutter-sm">
             <q-btn
               v-if="generatorConfig.backend === 'local'"
@@ -113,7 +110,6 @@
             />
           </div>
 
-          <!-- Progress indicator -->
           <div v-if="activeProgress" class="q-mt-md">
             <q-linear-progress
               :value="activeProgress.overall_progress"
@@ -136,6 +132,8 @@
         flat
         bordered
         class="scene-card q-mb-md"
+        :class="{ 'ring-primary': workspace.selectedSceneId === scene.id }"
+        @click="workspace.selectScene(scene.id)"
       >
         <q-card-section>
           <div class="row items-center q-mb-sm">
@@ -154,7 +152,7 @@
               size="sm"
               icon="arrow_upward"
               :disable="index === 0"
-              @click="moveScene(index, -1)"
+              @click.stop="moveScene(index, -1)"
             />
             <q-btn
               flat
@@ -162,7 +160,7 @@
               size="sm"
               icon="arrow_downward"
               :disable="index === story.scenes.length - 1"
-              @click="moveScene(index, 1)"
+              @click.stop="moveScene(index, 1)"
             />
             <q-btn
               flat
@@ -170,7 +168,7 @@
               size="sm"
               icon="delete"
               color="negative"
-              @click="removeScene(scene.id)"
+              @click.stop="removeScene(scene.id)"
             />
           </div>
 
@@ -183,43 +181,82 @@
                 outlined
                 dense
                 type="textarea"
-                rows="3"
+                rows="2"
                 placeholder="Describe the visual scene..."
                 @update:model-value="markDirty"
               />
-              <q-input
-                v-model="scene.description.camera_notes"
-                outlined
-                dense
-                class="q-mt-sm"
-                placeholder="Camera notes (angle, movement)"
-                @update:model-value="markDirty"
-              >
-                <template #prepend>
-                  <q-icon name="videocam" size="xs" />
-                </template>
-              </q-input>
+              <div class="row q-gutter-sm q-mt-xs">
+                <q-input
+                  v-model="scene.description.camera_notes"
+                  outlined
+                  dense
+                  class="col"
+                  placeholder="Camera notes (angle, movement)"
+                  @update:model-value="markDirty"
+                >
+                  <template #prepend>
+                    <q-icon name="videocam" size="xs" />
+                  </template>
+                </q-input>
+
+                <!-- Background assignment -->
+                <q-select
+                  :model-value="getSceneBackground(scene)"
+                  :options="backgroundOptions"
+                  label="Background"
+                  outlined
+                  dense
+                  emit-value
+                  map-options
+                  clearable
+                  style="width: 200px"
+                  @update:model-value="(v: string | null) => setSceneBackground(scene, v)"
+                >
+                  <template #prepend>
+                    <q-icon name="landscape" size="xs" />
+                  </template>
+                </q-select>
+              </div>
             </div>
 
-            <!-- Script/Dialog -->
+            <!-- Script/Dialog Lines -->
             <div class="col-12">
               <div class="text-caption text-grey-7 q-mb-xs">Script / Dialog</div>
               <div
                 v-for="(line, lineIndex) in scene.script_lines"
-                :key="lineIndex"
+                :key="line.id || lineIndex"
                 class="script-line row items-center q-gutter-sm q-mb-xs"
               >
+                <!-- Character avatar + selector -->
                 <q-select
                   v-model="line.character_id"
-                  :options="characterOptions"
+                  :options="characterOptionsWithNarrators"
                   dense
                   outlined
                   emit-value
                   map-options
-                  style="width: 120px"
-                  placeholder="Character"
+                  style="width: 150px"
+                  placeholder="Speaker"
                   @update:model-value="markDirty"
-                />
+                >
+                  <template #prepend>
+                    <q-avatar v-if="getCharacterForLine(line)" size="20px" :color="getCharacterForLine(line)?.role === 'narrator' ? 'deep-purple' : 'primary'" text-color="white">
+                      {{ (getCharacterForLine(line)?.name || 'N').charAt(0) }}
+                    </q-avatar>
+                    <q-icon v-else name="record_voice_over" size="16px" color="grey" />
+                  </template>
+                </q-select>
+
+                <!-- Voice indicator -->
+                <q-icon
+                  :name="getLineVoiceIcon(line)"
+                  :color="getLineVoiceColor(line)"
+                  size="16px"
+                >
+                  <q-tooltip>{{ getLineVoiceTooltip(line) }}</q-tooltip>
+                </q-icon>
+
+                <!-- Dialog text -->
                 <q-input
                   v-model="line.text"
                   dense
@@ -228,7 +265,35 @@
                   placeholder="Dialog or narration..."
                   @update:model-value="markDirty"
                 />
-                <q-btn flat round size="sm" icon="close" @click="removeLine(scene, lineIndex)" />
+
+                <!-- Emotion hint -->
+                <q-select
+                  v-model="line.emotion_hint"
+                  :options="emotionOptions"
+                  dense
+                  outlined
+                  emit-value
+                  map-options
+                  clearable
+                  style="width: 100px"
+                  placeholder="Emotion"
+                  @update:model-value="markDirty"
+                />
+
+                <!-- Voice preview -->
+                <q-btn
+                  flat
+                  round
+                  size="sm"
+                  icon="play_circle"
+                  color="primary"
+                  :disable="!line.text"
+                  @click.stop="previewLineVoice(scene, line)"
+                >
+                  <q-tooltip>Preview voice</q-tooltip>
+                </q-btn>
+
+                <q-btn flat round size="sm" icon="close" @click.stop="removeLine(scene, lineIndex)" />
               </div>
               <q-btn flat size="sm" icon="add" label="Add Line" @click="addLine(scene)" />
             </div>
@@ -236,18 +301,42 @@
 
           <!-- Characters in Scene -->
           <div class="q-mt-sm">
+            <div class="text-caption text-grey-7 q-mb-xs">Characters in scene</div>
             <q-chip
               v-for="charId in scene.character_ids"
               :key="charId"
               removable
-              color="primary"
+              :color="getCharacterById(charId)?.role === 'narrator' ? 'deep-purple' : 'primary'"
               text-color="white"
               size="sm"
               @remove="removeCharacterFromScene(scene, charId)"
             >
               {{ getCharacterName(charId) }}
             </q-chip>
-            <q-btn flat size="sm" icon="person_add" @click="addCharacterToScene(scene)" />
+            <q-btn-dropdown flat size="sm" icon="person_add" label="Add" class="q-ml-xs">
+              <q-list>
+                <q-item
+                  v-for="char in availableCharactersForScene(scene)"
+                  :key="char.id"
+                  clickable
+                  v-close-popup
+                  @click="addCharToScene(scene, char.id)"
+                >
+                  <q-item-section avatar>
+                    <q-avatar size="24px" :color="char.role === 'narrator' ? 'deep-purple' : 'primary'" text-color="white">
+                      {{ char.name.charAt(0) }}
+                    </q-avatar>
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>{{ char.name }}</q-item-label>
+                    <q-item-label v-if="char.role === 'narrator'" caption>Narrator</q-item-label>
+                  </q-item-section>
+                </q-item>
+                <q-item v-if="library.characters.length === 0" class="text-grey">
+                  <q-item-section>No characters. Create some first.</q-item-section>
+                </q-item>
+              </q-list>
+            </q-btn-dropdown>
           </div>
         </q-card-section>
       </q-card>
@@ -264,19 +353,16 @@
 
 <script setup lang="ts">
 import { computed, ref, reactive, watch, onMounted } from 'vue';
-import { useVideoProjectStore, useVideoJobsStore } from '../stores';
+import { useVideoProjectStore, useVideoJobsStore, useVideoWorkspaceStore } from '../stores';
 import GeneratorUiRenderer from './GeneratorUiRenderer.vue';
-import type { StoryScene, ScriptLine } from '../types';
+import type { StoryScene, ScriptLine, CharacterAsset } from '../types';
 
 const projectStore = useVideoProjectStore();
 const jobsStore = useVideoJobsStore();
+const workspace = useVideoWorkspaceStore();
 
 const story = computed(() => projectStore.story);
 const library = computed(() => projectStore.library);
-
-// ─────────────────────────────────────────────────────────────────────
-// Genre options
-// ─────────────────────────────────────────────────────────────────────
 
 const genreOptions = [
   { label: 'Advertising', value: 'advertising' },
@@ -287,23 +373,39 @@ const genreOptions = [
   { label: 'Other', value: 'other' },
 ];
 
-const characterOptions = computed(() => [
-  { label: 'Narrator', value: null },
+const emotionOptions = [
+  { label: 'Neutral', value: 'neutral' },
+  { label: 'Happy', value: 'happy' },
+  { label: 'Sad', value: 'sad' },
+  { label: 'Angry', value: 'angry' },
+  { label: 'Excited', value: 'excited' },
+  { label: 'Whisper', value: 'whisper' },
+  { label: 'Dramatic', value: 'dramatic' },
+  { label: 'Sarcastic', value: 'sarcastic' },
+];
+
+const characterOptionsWithNarrators = computed(() => [
+  { label: '(Narrator - default)', value: null },
   ...library.value.characters.map((c) => ({
-    label: c.name,
+    label: `${c.name}${c.role === 'narrator' ? ' [N]' : ''}`,
     value: c.id,
   })),
 ]);
 
-// ─────────────────────────────────────────────────────────────────────
-// AI Generation Settings
-// ─────────────────────────────────────────────────────────────────────
+const backgroundOptions = computed(() => [
+  ...library.value.products
+    .filter((p) => p.category === 'background')
+    .map((p) => ({
+      label: p.name,
+      value: p.id,
+    })),
+]);
 
+// AI Generation Settings
 const storyLLMCapabilities = computed(
   () => jobsStore.generators.find((g) => g.id === 'story_llm') ?? null,
 );
 
-/** Generator config (persisted in project settings.generator_configs.story_llm) */
 const generatorConfig = reactive<Record<string, unknown>>({
   backend: 'local',
   model_repo_id: 'Qwen/Qwen2.5-3B-Instruct',
@@ -335,7 +437,6 @@ const durationOptions = [
 const isGenerating = ref(false);
 const isDownloading = ref(false);
 
-// Active progress for the current story/download job
 const activeProgress = computed(() => {
   const progress = jobsStore.activeJobProgress;
   if (!progress) return null;
@@ -346,12 +447,10 @@ const activeProgress = computed(() => {
   return null;
 });
 
-// Load saved config from project settings on mount
 onMounted(() => {
   loadSavedConfig();
 });
 
-// Watch for project changes (e.g. opening a different project)
 watch(
   () => projectStore.projectId,
   () => loadSavedConfig(),
@@ -378,10 +477,64 @@ function saveConfigToProject(): void {
   void projectStore.updateSettings(currentSettings);
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// Scene Management
-// ─────────────────────────────────────────────────────────────────────
+// Character helpers
+function getCharacterById(id: string): CharacterAsset | undefined {
+  return library.value.characters.find((c) => c.id === id);
+}
 
+function getCharacterName(id: string): string {
+  return getCharacterById(id)?.name || 'Unknown';
+}
+
+function getCharacterForLine(line: ScriptLine): CharacterAsset | null {
+  if (!line.character_id) return null;
+  return getCharacterById(line.character_id) ?? null;
+}
+
+function getLineVoiceIcon(line: ScriptLine): string {
+  const char = getCharacterForLine(line);
+  if (!char) return 'record_voice_over';
+  if (char.voice_id) {
+    const voice = library.value.voices.find((v) => v.id === char.voice_id);
+    return voice ? 'mic' : 'mic_off';
+  }
+  return 'mic_off';
+}
+
+function getLineVoiceColor(line: ScriptLine): string {
+  const char = getCharacterForLine(line);
+  if (!char) return 'grey';
+  return char.voice_id ? 'positive' : 'warning';
+}
+
+function getLineVoiceTooltip(line: ScriptLine): string {
+  const char = getCharacterForLine(line);
+  if (!char) return 'Default narrator voice';
+  if (char.voice_id) {
+    const voice = library.value.voices.find((v) => v.id === char.voice_id);
+    return voice ? `Voice: ${voice.name}` : 'Voice not found';
+  }
+  return 'No voice assigned';
+}
+
+function getSceneBackground(scene: StoryScene): string | null {
+  return scene.description.style_ref?.asset_id ?? null;
+}
+
+function setSceneBackground(scene: StoryScene, productId: string | null): void {
+  if (productId) {
+    scene.description.style_ref = { asset_id: productId, asset_type: 'product' };
+  } else {
+    delete scene.description.style_ref;
+  }
+  markDirty();
+}
+
+function availableCharactersForScene(scene: StoryScene): CharacterAsset[] {
+  return library.value.characters.filter((c) => !scene.character_ids.includes(c.id));
+}
+
+// Scene Management
 function markDirty(): void {
   projectStore.markDirty();
 }
@@ -403,13 +556,15 @@ function addScene(): void {
 function removeScene(id: string): void {
   if (confirm('Remove this scene?')) {
     projectStore.removeScene(id);
+    if (workspace.selectedSceneId === id) {
+      workspace.selectScene(null);
+    }
   }
 }
 
 function moveScene(index: number, direction: number): void {
   const newIndex = index + direction;
   if (newIndex < 0 || newIndex >= story.value.scenes.length) return;
-
   const sceneIds = story.value.scenes.map((s) => s.id).filter((id): id is string => !!id);
   if (sceneIds[index] && sceneIds[newIndex]) {
     [sceneIds[index], sceneIds[newIndex]] = [sceneIds[newIndex], sceneIds[index]];
@@ -418,11 +573,10 @@ function moveScene(index: number, direction: number): void {
 }
 
 function addLine(scene: StoryScene): void {
-  const newLine: ScriptLine = {
+  scene.script_lines.push({
     id: crypto.randomUUID(),
     text: '',
-  };
-  scene.script_lines.push(newLine);
+  });
   markDirty();
 }
 
@@ -431,14 +585,8 @@ function removeLine(scene: StoryScene, index: number): void {
   markDirty();
 }
 
-function getCharacterName(id: string): string {
-  const char = library.value.characters.find((c) => c.id === id);
-  return char?.name || 'Unknown';
-}
-
-function addCharacterToScene(scene: StoryScene): void {
-  const charId = prompt('Enter character ID to add:');
-  if (charId && !scene.character_ids.includes(charId)) {
+function addCharToScene(scene: StoryScene, charId: string): void {
+  if (!scene.character_ids.includes(charId)) {
     scene.character_ids.push(charId);
     markDirty();
   }
@@ -449,10 +597,23 @@ function removeCharacterFromScene(scene: StoryScene, charId: string): void {
   markDirty();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// AI Actions
-// ─────────────────────────────────────────────────────────────────────
+async function previewLineVoice(scene: StoryScene, line: ScriptLine): Promise<void> {
+  if (!line.text) return;
+  try {
+    await jobsStore.generateAudio({
+      clipIds: [],
+      generatorConfig: {
+        text: line.text,
+        character_id: line.character_id,
+        preview: true,
+      },
+    });
+  } catch (e) {
+    console.error('Failed to preview voice:', e);
+  }
+}
 
+// AI Actions
 async function downloadModel(): Promise<void> {
   isDownloading.value = true;
   try {
@@ -497,6 +658,10 @@ async function generateWithAI(): Promise<void> {
 
     &:hover {
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    &.ring-primary {
+      outline: 2px solid var(--q-primary);
     }
   }
 }

@@ -1,0 +1,158 @@
+"""
+HunyuanVideo 1.5 Generator — Largest open video model (13B params).
+
+Supports FP8 quantization for consumer GPUs.
+Text-to-video with high visual quality.
+"""
+
+from typing import Any, Dict, List, Optional, Tuple
+
+from apps.video_editor.generators.base import (
+    VideoGenerator,
+    VideoResult,
+    ProgressCallback,
+)
+from apps.video_editor.models import (
+    AssetRef,
+    GeneratorCapabilities,
+    GeneratorType,
+    GeneratorUiSchema,
+    UiSection,
+    UiField,
+    UiFieldType,
+    UiFieldOption,
+    ShapeConstraints,
+    FrameCountRule,
+)
+
+
+class HunyuanVideoGenerator(VideoGenerator):
+    """HunyuanVideo 1.5 for large-scale text-to-video generation."""
+
+    _pipeline = None
+
+    @classmethod
+    def capabilities(cls) -> GeneratorCapabilities:
+        return GeneratorCapabilities(
+            id="t2v_hunyuan",
+            title="HunyuanVideo 1.5",
+            description="Largest open video model (13B). FP8 quantization for consumer GPUs.",
+            version="1.0.0",
+            generator_type=GeneratorType.T2V,
+            vram_gb_min=12.0,
+            vram_gb_recommended=24.0,
+            ram_gb_min=32.0,
+            supports_t2v=True,
+            shape_constraints=ShapeConstraints(
+                resolutions=[(544, 960), (960, 544), (720, 1280), (1280, 720)],
+                frame_count_rules=[
+                    FrameCountRule(min_frames=45, max_frames=129, step=4),
+                ],
+            ),
+            max_frames=129,
+            max_duration_seconds=6.0,
+            ui_schema=GeneratorUiSchema(sections=[
+                UiSection(
+                    key="model",
+                    label="Model",
+                    fields=[
+                        UiField(
+                            key="quantization",
+                            label="Quantization",
+                            field_type=UiFieldType.SELECT,
+                            default="fp8",
+                            required=False,
+                            options=[
+                                UiFieldOption(value="fp16", label="FP16 (full, 24GB+)"),
+                                UiFieldOption(value="fp8", label="FP8 (quantized, 12GB+)"),
+                            ],
+                        ),
+                    ],
+                ),
+                UiSection(
+                    key="generation",
+                    label="Generation",
+                    fields=[
+                        UiField(key="num_frames", label="Frames", field_type=UiFieldType.INT, default=61, required=False),
+                        UiField(key="guidance_scale", label="Guidance Scale", field_type=UiFieldType.FLOAT, default=6.0, required=False),
+                        UiField(key="num_inference_steps", label="Steps", field_type=UiFieldType.INT, default=30, required=False),
+                    ],
+                ),
+            ]),
+        )
+
+    async def load(self) -> None:
+        if self._pipeline is not None:
+            return
+        try:
+            import torch
+            from diffusers import HunyuanVideoPipeline
+            self._pipeline = HunyuanVideoPipeline.from_pretrained(
+                "tencent/HunyuanVideo",
+                torch_dtype=torch.bfloat16,
+            ).to("cuda")
+        except ImportError:
+            raise RuntimeError("diffusers with HunyuanVideo support is not installed")
+
+    async def unload(self) -> None:
+        if self._pipeline is not None:
+            del self._pipeline
+            self._pipeline = None
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    async def generate(
+        self,
+        prompt: str,
+        output_path: str,
+        negative_prompt: Optional[str] = None,
+        width: int = 960,
+        height: int = 544,
+        num_frames: int = 61,
+        fps: int = 24,
+        guidance_scale: float = 6.0,
+        num_inference_steps: int = 30,
+        seed: Optional[int] = None,
+        image_path: Optional[str] = None,
+        character_refs: Optional[List[AssetRef]] = None,
+        product_refs: Optional[List[AssetRef]] = None,
+        lora_refs: Optional[List[AssetRef]] = None,
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> VideoResult:
+        if self._pipeline is None:
+            return VideoResult(success=False, error="Model not loaded")
+
+        try:
+            import torch
+            from diffusers.utils import export_to_video
+
+            generator = torch.Generator(device="cuda")
+            if seed is not None:
+                generator.manual_seed(seed)
+
+            video_frames = self._pipeline(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                height=height,
+                width=width,
+                num_frames=num_frames,
+                guidance_scale=guidance_scale,
+                num_inference_steps=num_inference_steps,
+                generator=generator,
+            ).frames[0]
+
+            export_to_video(video_frames, output_path, fps=fps)
+
+            duration = num_frames / fps
+            return VideoResult(
+                success=True,
+                artifact_path=output_path,
+                duration_seconds=duration,
+                frame_count=num_frames,
+                fps=fps,
+                width=width,
+                height=height,
+            )
+        except Exception as e:
+            return VideoResult(success=False, error=str(e))

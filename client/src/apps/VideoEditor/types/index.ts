@@ -467,10 +467,37 @@ export interface AssetFolder {
   asset_type?: AssetType;
 }
 
+export interface MusicAsset {
+  id: string;
+  name: string;
+  path: string;
+  duration_seconds?: number;
+  genre?: string;
+  mood?: string;
+  tempo_bpm?: number;
+  source_prompt?: string;
+  generator_id?: string;
+  loop_compatible: boolean;
+  created_at: number;
+}
+
+export interface SfxAsset {
+  id: string;
+  name: string;
+  path: string;
+  duration_seconds?: number;
+  category?: string;
+  source_prompt?: string;
+  generator_id?: string;
+  created_at: number;
+}
+
 export interface AssetLibrary {
   characters: CharacterAsset[];
   products: ProductAsset[];
   voices: VoiceAsset[];
+  music: MusicAsset[];
+  sfx: SfxAsset[];
   generated: GeneratedAsset[];
   folders: AssetFolder[];
 }
@@ -579,6 +606,10 @@ export interface TimelineClip {
   video_generated_at?: number;
   av_generated_at?: number;
   generation_metadata?: Record<string, unknown>;
+  volume?: number;
+  fade_in_seconds?: number;
+  fade_out_seconds?: number;
+  loop?: boolean;
 }
 
 export interface TimelineTrack {
@@ -704,6 +735,8 @@ export function createDefaultAssetLibrary(): AssetLibrary {
     characters: [],
     products: [],
     voices: [],
+    music: [],
+    sfx: [],
     generated: [],
     folders: [],
   };
@@ -743,6 +776,15 @@ export function createDefaultTimeline(): Timeline {
         name: 'Music',
         type: 'music',
         order: 2,
+        muted: false,
+        locked: false,
+        height: 40,
+      },
+      {
+        id: 'audio_sfx',
+        name: 'SFX',
+        type: 'sfx',
+        order: 3,
         muted: false,
         locked: false,
         height: 40,

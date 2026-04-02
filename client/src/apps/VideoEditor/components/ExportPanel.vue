@@ -1,8 +1,8 @@
 <template>
-  <div class="export-panel">
+  <div class="export-panel q-pa-md">
     <div class="text-h5 q-mb-md">Export Project</div>
 
-    <!-- Export Status -->
+    <!-- Project Status -->
     <q-card flat bordered class="q-mb-md">
       <q-card-section>
         <div class="text-subtitle1 q-mb-sm">Project Status</div>
@@ -43,6 +43,24 @@
             <div class="text-caption">Need Regen</div>
           </div>
         </div>
+      </q-card-section>
+    </q-card>
+
+    <!-- Full Pipeline -->
+    <q-card flat bordered class="q-mb-md">
+      <q-card-section>
+        <div class="text-subtitle1 q-mb-sm">Full Pipeline</div>
+        <div class="text-caption text-grey q-mb-md">
+          Run the complete generation pipeline: TTS audio, keyframe images, videos, then final merge.
+        </div>
+        <q-btn
+          color="primary"
+          icon="play_circle"
+          label="Generate All"
+          :loading="isRunningPipeline"
+          class="full-width"
+          @click="runFullPipeline"
+        />
       </q-card-section>
     </q-card>
 
@@ -97,12 +115,26 @@
             :max="150"
             :step="5"
             label
-            :label-value="`${trackVolumes[track.id]}%`"
+            :label-value="`${trackVolumes[track.id] ?? 100}%`"
             color="primary"
             class="col"
           />
           <q-toggle v-model="trackEnabled[track.id]" dense class="q-ml-sm" />
         </div>
+
+        <q-separator class="q-my-md" />
+
+        <q-toggle v-model="normalizeAudio" label="Normalize audio (LUFS target)" />
+        <q-input
+          v-if="normalizeAudio"
+          v-model.number="lufsTarget"
+          label="LUFS Target"
+          type="number"
+          outlined
+          dense
+          class="q-mt-sm"
+          style="width: 120px"
+        />
       </q-card-section>
     </q-card>
 
@@ -152,52 +184,51 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useVideoProjectStore, useVideoJobsStore } from '../stores';
 import { isClipAudioStale, isClipVideoStale } from '../types';
+import type { TrackType } from '../types';
 
 const projectStore = useVideoProjectStore();
 const jobsStore = useVideoJobsStore();
 
-import type { TrackType } from '../types';
-
 const timeline = computed(() => projectStore.timeline);
 
-// Export settings
 const exportFormat = ref('mp4');
 const exportQuality = ref('high');
 const outputFilename = ref('my_video');
+const normalizeAudio = ref(false);
+const lufsTarget = ref(-14);
+const isRunningPipeline = ref(false);
 
-// Audio mix
 const audioTracks = computed(() =>
-  timeline.value.tracks.filter((t) => t.type === 'audio' || t.type === 'music' || t.type === 'sfx'),
+  timeline.value.tracks.filter(
+    (t) => t.type === 'audio' || t.type === 'music' || t.type === 'sfx',
+  ),
 );
 
-const trackVolumes = ref<Record<string, number>>({
-  audio_dialog: 100,
-  audio_music: 60,
-});
-const trackEnabled = ref<Record<string, boolean>>({
-  audio_dialog: true,
-  audio_music: true,
-});
+const trackVolumes = ref<Record<string, number>>({});
+const trackEnabled = ref<Record<string, boolean>>({});
 
-// Initialize volumes for all tracks
-audioTracks.value.forEach((t) => {
-  if (!(t.id in trackVolumes.value)) trackVolumes.value[t.id] = 100;
-  if (!(t.id in trackEnabled.value)) trackEnabled.value[t.id] = true;
-});
+function initTrackVolumes(): void {
+  for (const track of audioTracks.value) {
+    if (!(track.id in trackVolumes.value)) {
+      trackVolumes.value[track.id] = track.id === 'audio_music' ? 60 : 100;
+    }
+    if (!(track.id in trackEnabled.value)) {
+      trackEnabled.value[track.id] = true;
+    }
+  }
+}
+
+watch(audioTracks, () => initTrackVolumes(), { immediate: true });
 
 function trackIcon(type: TrackType): string {
   switch (type) {
-    case 'audio':
-      return 'record_voice_over';
-    case 'music':
-      return 'music_note';
-    case 'sfx':
-      return 'surround_sound';
-    default:
-      return 'volume_up';
+    case 'audio': return 'record_voice_over';
+    case 'music': return 'music_note';
+    case 'sfx': return 'surround_sound';
+    default: return 'volume_up';
   }
 }
 
@@ -214,19 +245,21 @@ const qualityOptions = [
   { label: 'Maximum', value: 'maximum' },
 ];
 
-// Statistics
 const totalClips = computed(() => timeline.value.clips.length);
 const completedClips = computed(
   () => timeline.value.clips.filter((c) => c.status === 'done').length,
 );
 const pendingClips = computed(
   () =>
-    timeline.value.clips.filter((c) => ['draft', 'queued', 'generating'].includes(c.status)).length,
+    timeline.value.clips.filter((c) =>
+      ['draft', 'queued', 'generating'].includes(c.status),
+    ).length,
 );
 const staleClips = computed(
   () =>
     timeline.value.clips.filter(
-      (c) => c.status === 'done' && (isClipAudioStale(c) || isClipVideoStale(c)),
+      (c) =>
+        c.status === 'done' && (isClipAudioStale(c) || isClipVideoStale(c)),
     ).length,
 );
 
@@ -235,10 +268,31 @@ const completionProgress = computed(() => {
   return completedClips.value / totalClips.value;
 });
 
-// Export state
 const isExporting = ref(false);
 const exportProgress = ref(0);
 const exportStage = ref('');
+
+async function runFullPipeline(): Promise<void> {
+  isRunningPipeline.value = true;
+  try {
+    const dialogClips = timeline.value.clips.filter((c) => c.track_id === 'audio_dialog');
+    if (dialogClips.length > 0) {
+      await jobsStore.generateAudio({ clipIds: dialogClips.map((c) => c.id) });
+    }
+
+    const videoClips = timeline.value.clips.filter((c) => c.track_id === 'video_main');
+    if (videoClips.length > 0) {
+      await jobsStore.generateImages({ clipIds: videoClips.map((c) => c.id) });
+      await jobsStore.generateVideo({ clipIds: videoClips.map((c) => c.id) });
+    }
+
+    await jobsStore.exportProject();
+  } catch (e) {
+    console.error('Pipeline failed:', e);
+  } finally {
+    isRunningPipeline.value = false;
+  }
+}
 
 async function exportVideo(): Promise<void> {
   try {
@@ -254,7 +308,10 @@ async function exportVideo(): Promise<void> {
 
 async function regenerateStale(): Promise<void> {
   const staleClipIds = timeline.value.clips
-    .filter((c) => c.status === 'done' && (isClipAudioStale(c) || isClipVideoStale(c)))
+    .filter(
+      (c) =>
+        c.status === 'done' && (isClipAudioStale(c) || isClipVideoStale(c)),
+    )
     .map((c) => c.id);
 
   if (staleClipIds.length > 0) {

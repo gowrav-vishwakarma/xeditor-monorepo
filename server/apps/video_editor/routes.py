@@ -131,7 +131,70 @@ async def init_video_editor() -> None:
         print("[video_editor] Registered: ZeroscopeT2VGenerator")
     except ImportError as e:
         print(f"[video_editor] Skipping ZeroscopeT2VGenerator: {e}")
-    
+
+    try:
+        from apps.video_editor.generators.impl.tts_f5 import F5TTSGenerator
+        generators_to_register.append(F5TTSGenerator)
+        print("[video_editor] Registered: F5TTSGenerator")
+    except ImportError as e:
+        print(f"[video_editor] Skipping F5TTSGenerator: {e}")
+
+    try:
+        from apps.video_editor.generators.impl.music_musicgen import MusicGenGenerator
+        generators_to_register.append(MusicGenGenerator)
+        print("[video_editor] Registered: MusicGenGenerator")
+    except ImportError as e:
+        print(f"[video_editor] Skipping MusicGenGenerator: {e}")
+
+    try:
+        from apps.video_editor.generators.impl.music_acestep import ACEStepMusicGenerator
+        generators_to_register.append(ACEStepMusicGenerator)
+        print("[video_editor] Registered: ACEStepMusicGenerator")
+    except ImportError as e:
+        print(f"[video_editor] Skipping ACEStepMusicGenerator: {e}")
+
+    try:
+        from apps.video_editor.generators.impl.sfx_audiogen import AudioGenSFXGenerator
+        generators_to_register.append(AudioGenSFXGenerator)
+        print("[video_editor] Registered: AudioGenSFXGenerator")
+    except ImportError as e:
+        print(f"[video_editor] Skipping AudioGenSFXGenerator: {e}")
+
+    try:
+        from apps.video_editor.generators.impl.t2i_ipadapter import IPAdapterSDXLGenerator
+        generators_to_register.append(IPAdapterSDXLGenerator)
+        print("[video_editor] Registered: IPAdapterSDXLGenerator")
+    except ImportError as e:
+        print(f"[video_editor] Skipping IPAdapterSDXLGenerator: {e}")
+
+    try:
+        from apps.video_editor.generators.impl.t2v_cogvideox import CogVideoXT2VGenerator
+        generators_to_register.append(CogVideoXT2VGenerator)
+        print("[video_editor] Registered: CogVideoXT2VGenerator")
+    except ImportError as e:
+        print(f"[video_editor] Skipping CogVideoXT2VGenerator: {e}")
+
+    try:
+        from apps.video_editor.generators.impl.i2v_wan import WanI2VGenerator
+        generators_to_register.append(WanI2VGenerator)
+        print("[video_editor] Registered: WanI2VGenerator")
+    except ImportError as e:
+        print(f"[video_editor] Skipping WanI2VGenerator: {e}")
+
+    try:
+        from apps.video_editor.generators.impl.t2v_hunyuan import HunyuanVideoGenerator
+        generators_to_register.append(HunyuanVideoGenerator)
+        print("[video_editor] Registered: HunyuanVideoGenerator")
+    except ImportError as e:
+        print(f"[video_editor] Skipping HunyuanVideoGenerator: {e}")
+
+    try:
+        from apps.video_editor.generators.impl.lipsync_musetalk import MuseTalkLipSyncGenerator
+        generators_to_register.append(MuseTalkLipSyncGenerator)
+        print("[video_editor] Registered: MuseTalkLipSyncGenerator")
+    except ImportError as e:
+        print(f"[video_editor] Skipping MuseTalkLipSyncGenerator: {e}")
+
     # Register all loaded generators
     for gen_class in generators_to_register:
         try:

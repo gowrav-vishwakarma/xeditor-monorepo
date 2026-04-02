@@ -1,7 +1,6 @@
 <template>
   <div class="video-player-container">
     <div class="player-viewport" :style="viewportStyle">
-      <!-- Video element -->
       <video
         v-if="currentVideoUrl"
         ref="videoEl"
@@ -12,7 +11,6 @@
         @loadedmetadata="onLoaded"
       />
 
-      <!-- Placeholder when no video -->
       <div v-else class="player-placeholder">
         <q-icon name="movie" size="64px" color="grey-7" />
         <div class="text-grey-7 q-mt-md text-body1">Select a clip to preview</div>
@@ -61,17 +59,17 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue';
-import { useVideoProjectStore } from '../stores';
+import { useVideoProjectStore, useVideoWorkspaceStore } from '../stores';
 import { useVideoCompanionStore } from '../stores/videoCompanion';
 
 const projectStore = useVideoProjectStore();
 const companion = useVideoCompanionStore();
+const workspace = useVideoWorkspaceStore();
 
 const videoEl = ref<HTMLVideoElement | null>(null);
 const isPlaying = ref(false);
 const currentTime = ref(0);
 const duration = ref(0);
-const selectedClipId = ref<string | null>(null);
 
 const viewportStyle = computed(() => {
   if (!projectStore.project) return {};
@@ -83,22 +81,24 @@ const viewportStyle = computed(() => {
 });
 
 const currentVideoUrl = computed(() => {
-  if (!projectStore.project || !selectedClipId.value) return null;
+  if (!projectStore.project || !workspace.selectedClipId) return null;
 
-  const clip = projectStore.project.timeline.clips.find((c) => c.id === selectedClipId.value);
+  const clip = projectStore.project.timeline.clips.find(
+    (c) => c.id === workspace.selectedClipId,
+  );
   if (!clip?.video_artifact_path) return null;
 
   return companion.getAssetUrl(projectStore.project.id, clip.video_artifact_path);
 });
 
-// Watch for timeline clip selection (provided by timeline editor)
 watch(
   () => projectStore.project?.timeline.clips,
   () => {
-    // If current clip was removed, deselect
-    if (selectedClipId.value && projectStore.project) {
-      const exists = projectStore.project.timeline.clips.some((c) => c.id === selectedClipId.value);
-      if (!exists) selectedClipId.value = null;
+    if (workspace.selectedClipId && projectStore.project) {
+      const exists = projectStore.project.timeline.clips.some(
+        (c) => c.id === workspace.selectedClipId,
+      );
+      if (!exists) workspace.selectClip(null);
     }
   },
 );
@@ -157,9 +157,6 @@ function formatTime(seconds: number): string {
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
-
-// Expose selectedClipId for timeline to set
-defineExpose({ selectedClipId });
 
 onBeforeUnmount(() => {
   if (videoEl.value) {

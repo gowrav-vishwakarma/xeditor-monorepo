@@ -1,5 +1,5 @@
 <template>
-  <q-layout view="hHh LpR fFf">
+  <q-layout view="hHh lpR fFf">
     <!-- Header Toolbar -->
     <q-header v-if="projectStore.isOpen" elevated class="bg-primary">
       <q-toolbar class="ve-toolbar">
@@ -14,28 +14,18 @@
 
         <q-separator vertical class="q-mx-xs" />
 
-        <!-- Workspace tools -->
+        <!-- Workspace mode buttons -->
         <q-btn-group flat class="q-mx-sm">
           <q-btn
+            v-for="mode in workspaceModes"
+            :key="mode.value"
             flat
             dense
-            icon="auto_fix_high"
-            text-color="white"
-            @click="showScriptGenerator = true"
+            :icon="mode.icon"
+            :text-color="workspace.activeMode === mode.value ? 'amber' : 'white'"
+            @click="workspace.setMode(mode.value)"
           >
-            <q-tooltip>Script Generator</q-tooltip>
-          </q-btn>
-          <q-btn flat dense icon="music_note" text-color="white" @click="rightPanel = 'audio'">
-            <q-tooltip>Audio Generator</q-tooltip>
-          </q-btn>
-          <q-btn flat dense icon="image" text-color="white" @click="rightPanel = 'image'">
-            <q-tooltip>Image Generator</q-tooltip>
-          </q-btn>
-          <q-btn flat dense icon="movie" text-color="white" @click="rightPanel = 'video'">
-            <q-tooltip>Video Generator</q-tooltip>
-          </q-btn>
-          <q-btn flat dense icon="face" text-color="white" @click="rightPanel = 'character'">
-            <q-tooltip>Character Designer</q-tooltip>
+            <q-tooltip>{{ mode.label }}</q-tooltip>
           </q-btn>
         </q-btn-group>
 
@@ -76,58 +66,44 @@
 
         <q-separator vertical class="q-mx-xs" />
 
-        <q-btn flat dense round icon="folder_open" text-color="white" @click="toggleLeftDrawer">
-          <q-tooltip>Toggle Asset Panel</q-tooltip>
-        </q-btn>
         <q-btn
           flat
           dense
           round
           icon="view_sidebar"
           text-color="white"
-          :class="{ 'text-white': rightDrawerOpen }"
-          @click="toggleRightDrawer"
+          @click="workspace.toggleRightDrawer()"
         >
           <q-tooltip>Toggle Properties Panel</q-tooltip>
         </q-btn>
-        <q-btn flat dense round icon="settings" text-color="white" @click="showSettings = true">
+        <q-btn
+          flat
+          dense
+          round
+          icon="settings"
+          text-color="white"
+          @click="workspace.showSettings = true"
+        >
           <q-tooltip>Project Settings</q-tooltip>
         </q-btn>
       </q-toolbar>
     </q-header>
 
-    <!-- Left Drawer (Asset Library) -->
+    <!-- Right Drawer (Properties) -->
     <q-drawer
       v-if="projectStore.isOpen"
-      v-model="leftDrawerOpen"
-      side="left"
-      :width="260"
-      bordered
-      class="bg-grey-1"
-    >
-      <AssetLibraryPanel />
-    </q-drawer>
-
-    <!-- Right Drawer (Properties / Generator Panels) -->
-    <q-drawer
-      v-if="projectStore.isOpen"
-      v-model="rightDrawerOpen"
+      v-model="workspace.rightDrawerOpen"
       side="right"
       :width="360"
       bordered
       class="bg-grey-1"
     >
-      <PropertiesPanel :active-panel="rightPanel" @update:active-panel="rightPanel = $event" />
+      <PropertiesPanel />
     </q-drawer>
 
     <!-- Main Content -->
     <q-page-container>
-      <router-view
-        :right-panel="rightPanel"
-        :show-script-generator="showScriptGenerator"
-        @update:right-panel="rightPanel = $event"
-        @update:show-script-generator="showScriptGenerator = $event"
-      />
+      <router-view />
     </q-page-container>
 
     <!-- Footer (Job Status Bar) -->
@@ -136,48 +112,40 @@
     </q-footer>
 
     <!-- Settings Dialog -->
-    <q-dialog v-model="showSettings" maximized>
-      <SettingsDialog @close="showSettings = false" />
+    <q-dialog v-model="workspace.showSettings" maximized>
+      <SettingsDialog @close="workspace.showSettings = false" />
     </q-dialog>
   </q-layout>
 </template>
 
 <script setup lang="ts">
-import { ref, provide, watch } from 'vue';
-import { useVideoProjectStore } from '../stores';
+import { watch } from 'vue';
+import { useVideoProjectStore, useVideoWorkspaceStore } from '../stores';
 import { useVideoCompanionStore } from '../stores/videoCompanion';
-import AssetLibraryPanel from '../components/AssetLibraryPanel.vue';
+import type { WorkspaceMode } from '../stores/videoWorkspace';
 import PropertiesPanel from '../components/PropertiesPanel.vue';
 import GenerationQueuePanel from '../components/GenerationQueuePanel.vue';
 import SettingsDialog from '../components/SettingsDialog.vue';
 
 const projectStore = useVideoProjectStore();
 const companionStore = useVideoCompanionStore();
+const workspace = useVideoWorkspaceStore();
 
-// UI State
-const leftDrawerOpen = ref(true);
-const rightDrawerOpen = ref(true);
-const showSettings = ref(false);
-const showScriptGenerator = ref(false);
-
-// Right panel mode
-const rightPanel = ref<'properties' | 'audio' | 'image' | 'video' | 'character' | 'scene'>(
-  'properties',
-);
-
-// Toggle functions
-function toggleLeftDrawer(): void {
-  leftDrawerOpen.value = !leftDrawerOpen.value;
+interface ModeConfig {
+  value: WorkspaceMode;
+  label: string;
+  icon: string;
 }
 
-function toggleRightDrawer(): void {
-  rightDrawerOpen.value = !rightDrawerOpen.value;
-}
-
-// Provide state to children
-provide('leftDrawerOpen', leftDrawerOpen);
-provide('rightDrawerOpen', rightDrawerOpen);
-provide('rightPanel', rightPanel);
+const workspaceModes: ModeConfig[] = [
+  { value: 'script', label: 'Script / Story', icon: 'auto_fix_high' },
+  { value: 'characters', label: 'Characters', icon: 'face' },
+  { value: 'voices', label: 'Voices', icon: 'record_voice_over' },
+  { value: 'audio', label: 'Dialog Audio', icon: 'mic' },
+  { value: 'music', label: 'Music & SFX', icon: 'music_note' },
+  { value: 'video', label: 'Video', icon: 'movie' },
+  { value: 'export', label: 'Export', icon: 'file_download' },
+];
 
 async function saveProject(): Promise<void> {
   try {
@@ -187,7 +155,6 @@ async function saveProject(): Promise<void> {
   }
 }
 
-// Load recent projects when connected
 let recentProjectsLoaded = false;
 let isLoadingRecentProjects = false;
 

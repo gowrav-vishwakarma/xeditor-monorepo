@@ -496,11 +496,40 @@ class AssetFolder(BaseModel):
     asset_type: Optional[AssetType] = None  # Filter type, or None for mixed
 
 
+class MusicAsset(BaseModel):
+    """Music asset in the library."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    path: str
+    duration_seconds: Optional[float] = None
+    genre: Optional[str] = None
+    mood: Optional[str] = None
+    tempo_bpm: Optional[int] = None
+    source_prompt: Optional[str] = None
+    generator_id: Optional[str] = None
+    loop_compatible: bool = False
+    created_at: float = Field(default_factory=lambda: datetime.now().timestamp())
+
+
+class SfxAsset(BaseModel):
+    """Sound effect asset in the library."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    path: str
+    duration_seconds: Optional[float] = None
+    category: Optional[str] = None
+    source_prompt: Optional[str] = None
+    generator_id: Optional[str] = None
+    created_at: float = Field(default_factory=lambda: datetime.now().timestamp())
+
+
 class AssetLibrary(BaseModel):
     """Complete asset library for a project."""
     characters: List[CharacterAsset] = Field(default_factory=list)
     products: List[ProductAsset] = Field(default_factory=list)
     voices: List[VoiceAsset] = Field(default_factory=list)
+    music: List[MusicAsset] = Field(default_factory=list)
+    sfx: List[SfxAsset] = Field(default_factory=list)
     generated: List[GeneratedAsset] = Field(default_factory=list)
     folders: List[AssetFolder] = Field(default_factory=list)
 
@@ -646,6 +675,12 @@ class TimelineClip(BaseModel):
     # Metadata from generation
     generation_metadata: Optional[Dict[str, Any]] = None
 
+    # Audio mix
+    volume: float = 1.0
+    fade_in_seconds: float = 0.0
+    fade_out_seconds: float = 0.0
+    loop: bool = False
+
     @property
     def is_audio_stale(self) -> bool:
         if self.audio_generated_at is None and self.av_generated_at is None:
@@ -702,6 +737,7 @@ class Timeline(BaseModel):
         TimelineTrack(id="video_main", name="Video 1", type=TrackType.VIDEO, order=0),
         TimelineTrack(id="audio_dialog", name="Dialog", type=TrackType.AUDIO, order=1),
         TimelineTrack(id="audio_music", name="Music", type=TrackType.MUSIC, order=2),
+        TimelineTrack(id="audio_sfx", name="SFX", type=TrackType.SFX, order=3),
     ])
     clips: List[TimelineClip] = Field(default_factory=list)
     scene_instances: List[SceneInstance] = Field(default_factory=list)
