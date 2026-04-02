@@ -22,6 +22,7 @@ dependencies = [
     # File watching
     "watchdog",
     "python-multipart>=0.0.22",
+    "torchcodec>=0.11.0",
 ]
 
 [project.optional-dependencies]
