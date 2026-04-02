@@ -32,7 +32,11 @@ class HunyuanVideoGenerator(VideoGenerator):
     _pipeline = None
 
     @classmethod
-    def capabilities(cls) -> GeneratorCapabilities:
+    def get_id(cls) -> str:
+        return "t2v_hunyuan"
+
+    @classmethod
+    def get_capabilities(cls) -> GeneratorCapabilities:
         return GeneratorCapabilities(
             id="t2v_hunyuan",
             title="HunyuanVideo 1.5",

@@ -30,7 +30,11 @@ class ACEStepMusicGenerator(MusicGenerator):
     _pipeline = None
 
     @classmethod
-    def capabilities(cls) -> GeneratorCapabilities:
+    def get_id(cls) -> str:
+        return "music_acestep"
+
+    @classmethod
+    def get_capabilities(cls) -> GeneratorCapabilities:
         return GeneratorCapabilities(
             id="music_acestep",
             title="ACE-Step 1.5",

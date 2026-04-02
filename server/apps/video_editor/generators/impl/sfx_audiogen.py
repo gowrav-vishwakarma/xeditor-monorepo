@@ -29,7 +29,11 @@ class AudioGenSFXGenerator(SFXGenerator):
     _model = None
 
     @classmethod
-    def capabilities(cls) -> GeneratorCapabilities:
+    def get_id(cls) -> str:
+        return "sfx_audiogen"
+
+    @classmethod
+    def get_capabilities(cls) -> GeneratorCapabilities:
         return GeneratorCapabilities(
             id="sfx_audiogen",
             title="AudioGen (Meta AudioCraft)",

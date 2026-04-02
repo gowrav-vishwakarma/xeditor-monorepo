@@ -30,7 +30,11 @@ class MuseTalkLipSyncGenerator(LipSyncGenerator):
     _model = None
 
     @classmethod
-    def capabilities(cls) -> GeneratorCapabilities:
+    def get_id(cls) -> str:
+        return "lipsync_musetalk"
+
+    @classmethod
+    def get_capabilities(cls) -> GeneratorCapabilities:
         return GeneratorCapabilities(
             id="lipsync_musetalk",
             title="MuseTalk 1.5",

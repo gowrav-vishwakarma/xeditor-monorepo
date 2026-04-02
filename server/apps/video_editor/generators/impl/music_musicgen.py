@@ -31,7 +31,11 @@ class MusicGenGenerator(MusicGenerator):
     _model_size: str = "medium"
 
     @classmethod
-    def capabilities(cls) -> GeneratorCapabilities:
+    def get_id(cls) -> str:
+        return "music_musicgen"
+
+    @classmethod
+    def get_capabilities(cls) -> GeneratorCapabilities:
         return GeneratorCapabilities(
             id="music_musicgen",
             title="MusicGen (Meta AudioCraft)",

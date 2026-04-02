@@ -10,12 +10,21 @@ Manages generation jobs with:
 """
 
 import asyncio
+import logging
 import os
+import traceback
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+
+log = logging.getLogger("ve.jobs")
+if not log.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("[%(name)s] %(message)s"))
+    log.addHandler(_handler)
+    log.setLevel(logging.DEBUG)
 
 from apps.video_editor.models import (
     AssetType,
@@ -126,6 +135,11 @@ class JobQueue:
             self._pending_queue.append(queued)
             job.status = JobStatus.QUEUED
 
+            log.info(
+                "[enqueue] %s job %s queued (project=%s, clips=%d, generator=%s)",
+                job.type.value, job.id, project_id,
+                len(job.clip_ids), job.generator_id or "default",
+            )
             asyncio.create_task(self._process_queue())
             return job.id
 
@@ -224,6 +238,11 @@ class JobQueue:
             job.status = JobStatus.RUNNING
             job.started_at = datetime.now().timestamp()
 
+            log.info(
+                "[run] ▶ %s job %s RUNNING (vram=%.1fGB)",
+                job.type.value, job.id, job.vram_gb_required,
+            )
+
             await self._broadcast_progress(queued, JobProgressEvent(
                 job_id=job.id,
                 seq=self._next_seq(queued),
@@ -233,7 +252,6 @@ class JobQueue:
                 message=f"Starting {job.type.value} job",
             ))
 
-            # Dispatch to handler
             handler = self._get_handler(job.type)
             if handler is None:
                 raise ValueError(f"No handler for job type: {job.type}")
@@ -241,8 +259,13 @@ class JobQueue:
             await handler(queued, cancel_event)
 
             if not queued.cancelled:
+                elapsed = datetime.now().timestamp() - (job.started_at or 0)
                 job.status = JobStatus.COMPLETED
                 job.completed_at = datetime.now().timestamp()
+                log.info(
+                    "[run] ✓ %s job %s COMPLETED in %.1fs",
+                    job.type.value, job.id, elapsed,
+                )
                 await self._broadcast_progress(queued, JobProgressEvent(
                     job_id=job.id,
                     seq=self._next_seq(queued),
@@ -254,6 +277,7 @@ class JobQueue:
 
         except asyncio.CancelledError:
             job.status = JobStatus.CANCELLED
+            log.warning("[run] ✗ %s job %s CANCELLED", job.type.value, job.id)
             await self._broadcast_progress(queued, JobProgressEvent(
                 job_id=job.id,
                 seq=self._next_seq(queued),
@@ -267,6 +291,10 @@ class JobQueue:
             job.status = JobStatus.FAILED
             job.error_message = str(e)
             job.completed_at = datetime.now().timestamp()
+            log.error(
+                "[run] ✗ %s job %s FAILED: %s\n%s",
+                job.type.value, job.id, e, traceback.format_exc(),
+            )
             await self._broadcast_progress(queued, JobProgressEvent(
                 job_id=job.id,
                 seq=self._next_seq(queued),
@@ -314,14 +342,19 @@ class JobQueue:
         self, queued: QueuedJob, event: JobProgressEvent
     ) -> None:
         queued.job.last_progress = event.overall_progress
+        log.info(
+            "[progress] %s | %s %.0f%% | %s",
+            queued.job.id[:12], event.stage,
+            event.overall_progress * 100, event.message,
+        )
         if queued.broadcast:
             try:
                 await queued.broadcast(
                     "ve_job_progress",
                     {"projectId": queued.project_id, "event": event.model_dump()},
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning("[progress] Failed to broadcast: %s", exc)
 
     def _make_progress_callback(
         self, queued: QueuedJob, stage: str,
@@ -352,8 +385,12 @@ class JobQueue:
 
         gen_class = registry.get_generator_class(gid)
         if not gen_class:
-            raise RuntimeError(f"Generator not found: {gid}")
+            available = [g.id for g in registry.list_generators()]
+            raise RuntimeError(
+                f"Generator not found: {gid}. Available: {available}"
+            )
 
+        log.info("[resolve] Using generator: %s (%s)", gid, gen_class.__name__)
         gen_config = GeneratorConfig(
             generator_id=gid,
             custom=config or {},
@@ -383,8 +420,16 @@ class JobQueue:
         project = self._get_project(queued.project_id)
         manager = get_video_project_manager()
 
+        log.info("[story] Resolving LLM generator...")
         gen = self._resolve_generator(job.generator_id, job.generator_config, "story_llm")
+        log.info("[story] Loading model...")
+        await self._broadcast_progress(queued, JobProgressEvent(
+            job_id=job.id, seq=self._next_seq(queued),
+            stage="loading_model", stage_progress=0.0, overall_progress=0.0,
+            message=f"Loading story LLM: {gen.config.generator_id}",
+        ))
         await gen.load()
+        log.info("[story] Model loaded")
 
         if cancel_event and cancel_event.is_set():
             raise asyncio.CancelledError()
@@ -488,8 +533,10 @@ class JobQueue:
                     updated_at=datetime.now().timestamp(),
                 )
                 manager.update_story(queued.project_id, new_story)
+                log.info("[story] ✓ Story updated with %d scenes", len(scenes))
 
         finally:
+            log.info("[story] Unloading model...")
             await gen.unload()
 
     async def _run_tts_job(
@@ -499,14 +546,25 @@ class JobQueue:
         job = queued.job
         project = self._get_project(queued.project_id)
 
+        log.info("[tts] Resolving TTS generator (requested=%s)", job.generator_id)
         gen = self._resolve_generator(job.generator_id, job.generator_config, "tts_coqui_xtts")
+
+        log.info("[tts] Loading model...")
+        await self._broadcast_progress(queued, JobProgressEvent(
+            job_id=job.id, seq=self._next_seq(queued),
+            stage="loading_model", stage_progress=0.0, overall_progress=0.0,
+            message=f"Loading TTS model: {gen.config.generator_id}",
+        ))
         await gen.load()
+        log.info("[tts] Model loaded successfully")
 
         try:
-            # Find clips to process
             clips = [c for c in project.timeline.clips if c.id in job.clip_ids]
             if not clips:
+                log.warning("[tts] No matching clips found for IDs: %s", job.clip_ids)
                 return
+
+            log.info("[tts] Processing %d clip(s)", len(clips))
 
             assets_dir = Path(project.root_path or "") / "xeditor.video" / "assets" / "audio"
             assets_dir.mkdir(parents=True, exist_ok=True)
@@ -515,7 +573,6 @@ class JobQueue:
                 if cancel_event and cancel_event.is_set():
                     raise asyncio.CancelledError()
 
-                # Gather text from script lines
                 texts = []
                 for line_id in clip.script_line_ids:
                     for scene in project.story.scenes:
@@ -524,12 +581,17 @@ class JobQueue:
                                 texts.append(line.text)
 
                 if not texts:
+                    log.warning("[tts] Clip %s has no script text, skipping", clip.id)
                     continue
 
                 full_text = " ".join(texts)
                 output_path = str(assets_dir / f"{clip.id}.wav")
+                log.info(
+                    "[tts] Clip %d/%d (%s): \"%s\"",
+                    i + 1, len(clips), clip.id[:12],
+                    full_text[:80] + ("..." if len(full_text) > 80 else ""),
+                )
 
-                # Resolve voice sample: line voice_override > character voice_id > character voice_sample_path > scene first character
                 voice_sample = None
                 first_line_id = clip.script_line_ids[0] if clip.script_line_ids else None
                 matched_line = None
@@ -576,6 +638,11 @@ class JobQueue:
                         if char and char.voice_sample_path:
                             voice_sample = str(Path(project.root_path or "") / char.voice_sample_path)
 
+                log.info(
+                    "[tts] Voice sample: %s",
+                    voice_sample or "(none / default voice)",
+                )
+
                 progress_cb = self._make_progress_callback(
                     queued, f"tts_{i+1}", 1.0 / len(clips), i / len(clips)
                 )
@@ -596,11 +663,18 @@ class JobQueue:
                     clip.audio_generated_at = datetime.now().timestamp()
                     clip.status = ClipStatus.DONE
                     job.artifact_paths.append(output_path)
+                    log.info(
+                        "[tts] ✓ Clip %s done (%.1fs audio → %s)",
+                        clip.id[:12], result.duration_seconds or 0, output_path,
+                    )
                 else:
                     clip.status = ClipStatus.ERROR
+                    log.error("[tts] ✗ Clip %s failed: %s", clip.id[:12], result.error)
 
         finally:
+            log.info("[tts] Unloading model...")
             await gen.unload()
+            log.info("[tts] Model unloaded")
 
     async def _run_image_job(
         self, queued: QueuedJob, cancel_event: Optional[asyncio.Event]
@@ -609,12 +683,21 @@ class JobQueue:
         job = queued.job
         project = self._get_project(queued.project_id)
 
+        log.info("[image] Resolving image generator...")
         gen = self._resolve_generator(job.generator_id, job.generator_config, "t2i_sdxl")
+        log.info("[image] Loading model...")
+        await self._broadcast_progress(queued, JobProgressEvent(
+            job_id=job.id, seq=self._next_seq(queued),
+            stage="loading_model", stage_progress=0.0, overall_progress=0.0,
+            message=f"Loading image model: {gen.config.generator_id}",
+        ))
         await gen.load()
+        log.info("[image] Model loaded")
 
         try:
             clips = [c for c in project.timeline.clips if c.id in job.clip_ids]
             if not clips:
+                log.warning("[image] No matching clips found")
                 return
 
             images_dir = Path(project.root_path or "") / "xeditor.video" / "assets" / "images"
@@ -650,10 +733,13 @@ class JobQueue:
                     clip.keyframe_edited_at = datetime.now().timestamp()
                     clip.status = ClipStatus.KEYFRAME_READY
                     job.artifact_paths.append(output_path)
+                    log.info("[image] ✓ Clip %s keyframe generated", clip.id[:12])
                 else:
                     clip.status = ClipStatus.ERROR
+                    log.error("[image] ✗ Clip %s failed: %s", clip.id[:12], result.error)
 
         finally:
+            log.info("[image] Unloading model...")
             await gen.unload()
 
     async def _run_video_job(
@@ -663,12 +749,21 @@ class JobQueue:
         job = queued.job
         project = self._get_project(queued.project_id)
 
+        log.info("[video] Resolving video generator...")
         gen = self._resolve_generator(job.generator_id, job.generator_config, "i2v_slideshow")
+        log.info("[video] Loading model...")
+        await self._broadcast_progress(queued, JobProgressEvent(
+            job_id=job.id, seq=self._next_seq(queued),
+            stage="loading_model", stage_progress=0.0, overall_progress=0.0,
+            message=f"Loading video model: {gen.config.generator_id}",
+        ))
         await gen.load()
+        log.info("[video] Model loaded")
 
         try:
             clips = [c for c in project.timeline.clips if c.id in job.clip_ids]
             if not clips:
+                log.warning("[video] No matching clips found")
                 return
 
             videos_dir = Path(project.root_path or "") / "xeditor.video" / "assets" / "videos"
@@ -725,10 +820,13 @@ class JobQueue:
                     clip.video_generated_at = datetime.now().timestamp()
                     clip.status = ClipStatus.DONE
                     job.artifact_paths.append(output_path)
+                    log.info("[video] ✓ Clip %s generated (%.1fs)", clip.id[:12], result.duration_seconds)
                 else:
                     clip.status = ClipStatus.ERROR
+                    log.error("[video] ✗ Clip %s failed: %s", clip.id[:12], result.error)
 
         finally:
+            log.info("[video] Unloading model...")
             await gen.unload()
 
     async def _run_av_job(
@@ -738,8 +836,16 @@ class JobQueue:
         job = queued.job
         project = self._get_project(queued.project_id)
 
+        log.info("[av] Resolving AV generator...")
         gen = self._resolve_generator(job.generator_id, job.generator_config)
+        log.info("[av] Loading model...")
+        await self._broadcast_progress(queued, JobProgressEvent(
+            job_id=job.id, seq=self._next_seq(queued),
+            stage="loading_model", stage_progress=0.0, overall_progress=0.0,
+            message=f"Loading AV model: {gen.config.generator_id}",
+        ))
         await gen.load()
+        log.info("[av] Model loaded")
 
         try:
             clips = [c for c in project.timeline.clips if c.id in job.clip_ids]
@@ -794,6 +900,7 @@ class JobQueue:
                     clip.status = ClipStatus.ERROR
 
         finally:
+            log.info("[av] Unloading model...")
             await gen.unload()
 
     async def _run_music_job(
@@ -803,8 +910,16 @@ class JobQueue:
         job = queued.job
         project = self._get_project(queued.project_id)
 
+        log.info("[music] Resolving music generator...")
         gen = self._resolve_generator(job.generator_id, job.generator_config)
+        log.info("[music] Loading model...")
+        await self._broadcast_progress(queued, JobProgressEvent(
+            job_id=job.id, seq=self._next_seq(queued),
+            stage="loading_model", stage_progress=0.0, overall_progress=0.0,
+            message=f"Loading music model: {gen.config.generator_id}",
+        ))
         await gen.load()
+        log.info("[music] Model loaded")
 
         try:
             clips = [c for c in project.timeline.clips if c.id in job.clip_ids]
@@ -839,10 +954,13 @@ class JobQueue:
                     clip.audio_generated_at = datetime.now().timestamp()
                     clip.status = ClipStatus.DONE
                     job.artifact_paths.append(output_path)
+                    log.info("[music] ✓ Clip %s generated", clip.id[:12])
                 else:
                     clip.status = ClipStatus.ERROR
+                    log.error("[music] ✗ Clip %s failed: %s", clip.id[:12], result.error)
 
         finally:
+            log.info("[music] Unloading model...")
             await gen.unload()
 
     async def _run_sfx_job(
@@ -852,8 +970,16 @@ class JobQueue:
         job = queued.job
         project = self._get_project(queued.project_id)
 
+        log.info("[sfx] Resolving SFX generator...")
         gen = self._resolve_generator(job.generator_id, job.generator_config)
+        log.info("[sfx] Loading model...")
+        await self._broadcast_progress(queued, JobProgressEvent(
+            job_id=job.id, seq=self._next_seq(queued),
+            stage="loading_model", stage_progress=0.0, overall_progress=0.0,
+            message=f"Loading SFX model: {gen.config.generator_id}",
+        ))
         await gen.load()
+        log.info("[sfx] Model loaded")
 
         try:
             clips = [c for c in project.timeline.clips if c.id in job.clip_ids]
@@ -885,8 +1011,10 @@ class JobQueue:
                     clip.audio_generated_at = datetime.now().timestamp()
                     clip.status = ClipStatus.DONE
                     job.artifact_paths.append(output_path)
+                    log.info("[sfx] ✓ Clip %s generated", clip.id[:12])
 
         finally:
+            log.info("[sfx] Unloading model...")
             await gen.unload()
 
     async def _run_lipsync_job(
@@ -896,8 +1024,16 @@ class JobQueue:
         job = queued.job
         project = self._get_project(queued.project_id)
 
+        log.info("[lipsync] Resolving lipsync generator...")
         gen = self._resolve_generator(job.generator_id, job.generator_config)
+        log.info("[lipsync] Loading model...")
+        await self._broadcast_progress(queued, JobProgressEvent(
+            job_id=job.id, seq=self._next_seq(queued),
+            stage="loading_model", stage_progress=0.0, overall_progress=0.0,
+            message=f"Loading lipsync model: {gen.config.generator_id}",
+        ))
         await gen.load()
+        log.info("[lipsync] Model loaded")
 
         try:
             clips = [c for c in project.timeline.clips if c.id in job.clip_ids]
@@ -947,8 +1083,10 @@ class JobQueue:
                     clip.video_generated_at = datetime.now().timestamp()
                     clip.status = ClipStatus.DONE
                     job.artifact_paths.append(output_path)
+                    log.info("[lipsync] ✓ Clip %s generated", clip.id[:12])
 
         finally:
+            log.info("[lipsync] Unloading model...")
             await gen.unload()
 
     async def _run_plan_job(
@@ -961,17 +1099,21 @@ class JobQueue:
         project = self._get_project(queued.project_id)
 
         if job.scene_ids:
+            log.info("[plan] Replanning %d scene(s)...", len(job.scene_ids))
             for scene_id in job.scene_ids:
                 if cancel_event and cancel_event.is_set():
                     raise asyncio.CancelledError()
                 replan_scene(project, scene_id)
         else:
+            log.info("[plan] Planning all scenes...")
             plan_all_scenes(project)
+        log.info("[plan] Planning complete")
 
     async def _run_merge_job(
         self, queued: QueuedJob, cancel_event: Optional[asyncio.Event]
     ) -> None:
         """Run final merge/export job using FFmpeg."""
+        log.info("[merge] Starting final merge/export...")
         job = queued.job
         project = self._get_project(queued.project_id)
 
@@ -1008,6 +1150,12 @@ class JobQueue:
 
         if not video_clips:
             raise RuntimeError("No video clips to merge")
+
+        log.info(
+            "[merge] Found %d video clips, %d audio clips (muted tracks: %s)",
+            len(video_clips), len(audio_clips),
+            muted_track_ids or "none",
+        )
 
         root = Path(project.root_path or "")
 
@@ -1074,6 +1222,8 @@ class JobQueue:
 
         cmd.append(output_path)
 
+        log.info("[merge] FFmpeg command: %s", " ".join(cmd[:6]) + " ...")
+
         await self._broadcast_progress(queued, JobProgressEvent(
             job_id=job.id,
             seq=self._next_seq(queued),
@@ -1085,12 +1235,13 @@ class JobQueue:
 
         proc = subprocess.run(cmd, capture_output=True, text=True)
 
-        # Cleanup
         concat_file.unlink(missing_ok=True)
 
         if proc.returncode != 0:
+            log.error("[merge] FFmpeg failed (exit %d): %s", proc.returncode, proc.stderr[-1000:] if proc.stderr else "")
             raise RuntimeError(f"FFmpeg failed: {proc.stderr[-500:] if proc.stderr else 'Unknown error'}")
 
+        log.info("[merge] ✓ Export written to %s", output_path)
         job.artifact_paths.append(output_path)
 
         # Add to generated assets
@@ -1218,6 +1369,12 @@ async def handle_ve_start_job(
     generator_id = payload.get("generatorId")
     generator_config = payload.get("generatorConfig")
     story_spec = payload.get("storySpec")
+
+    log.info(
+        "[rpc] ve_job_start: type=%s, project=%s, clips=%d, scenes=%d, generator=%s",
+        job_type_str, project_id[:12] if project_id else "?",
+        len(clip_ids), len(scene_ids), generator_id or "default",
+    )
 
     if not project_id or not job_type_str:
         return {"success": False, "error": "projectId and jobType are required"}

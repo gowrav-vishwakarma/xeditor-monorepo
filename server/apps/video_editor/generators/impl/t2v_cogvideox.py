@@ -32,7 +32,11 @@ class CogVideoXT2VGenerator(VideoGenerator):
     _pipeline = None
 
     @classmethod
-    def capabilities(cls) -> GeneratorCapabilities:
+    def get_id(cls) -> str:
+        return "t2v_cogvideox"
+
+    @classmethod
+    def get_capabilities(cls) -> GeneratorCapabilities:
         return GeneratorCapabilities(
             id="t2v_cogvideox",
             title="CogVideoX",

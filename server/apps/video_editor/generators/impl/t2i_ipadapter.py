@@ -30,7 +30,11 @@ class IPAdapterSDXLGenerator(ImageGenerator):
     _pipeline = None
 
     @classmethod
-    def capabilities(cls) -> GeneratorCapabilities:
+    def get_id(cls) -> str:
+        return "t2i_ipadapter"
+
+    @classmethod
+    def get_capabilities(cls) -> GeneratorCapabilities:
         return GeneratorCapabilities(
             id="t2i_ipadapter",
             title="IP-Adapter + SDXL",
