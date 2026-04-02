@@ -396,6 +396,20 @@ def _find_ripgrep_binary(auto_download: bool = False) -> Optional[str]:
         cached_rg = _get_rg_cache_dir() / rg_name
         if cached_rg.exists() and cached_rg.is_file() and _validate_rg_binary(str(cached_rg)):
             return _set_cache(str(cached_rg))
+        # Production: system rg — check both PATH and common install locations
+        # AppImage may isolate PATH, so also probe standard locations directly
+        system_candidates: list[str] = []
+        rg_from_path = shutil.which("rg")
+        if rg_from_path:
+            system_candidates.append(rg_from_path)
+        if sys.platform != "win32":
+            for loc in ("/usr/bin/rg", "/usr/local/bin/rg", "/snap/bin/rg"):
+                if loc not in system_candidates:
+                    system_candidates.append(loc)
+        for candidate in system_candidates:
+            if Path(candidate).exists() and _validate_rg_binary(candidate):
+                print(f"[rg] Using system ripgrep: {candidate}")
+                return _set_cache(candidate)
         # Production: auto-download to cache
         if auto_download:
             print("[rg] No valid ripgrep found, attempting auto-download...")
