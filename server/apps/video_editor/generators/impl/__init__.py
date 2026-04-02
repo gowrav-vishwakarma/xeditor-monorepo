@@ -4,6 +4,10 @@ Video Editor Generator Implementations
 This package contains the concrete generator implementations for the video editor.
 """
 
+from apps.video_editor.torchaudio_soundfile_io import apply_patch as _apply_torchaudio_sf_io
+
+_apply_torchaudio_sf_io()
+
 from apps.video_editor.generators.impl.tts_coqui_xtts import CoquiXTTSGenerator
 from apps.video_editor.generators.impl.tts_f5 import F5TTSGenerator
 from apps.video_editor.generators.impl.t2i_sdxl import SDXLT2IGenerator

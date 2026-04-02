@@ -262,7 +262,32 @@
             />
           </q-item-section>
         </q-item>
+
+        <template v-if="workspace.selectedClip.audio_artifact_path">
+          <q-separator />
+          <q-item-label header>Generated speech</q-item-label>
+          <q-item>
+            <q-item-section>
+              <div class="row q-gutter-sm items-center">
+                <q-btn
+                  outline
+                  size="sm"
+                  color="primary"
+                  :icon="clipAudioPlaying ? 'stop' : 'play_arrow'"
+                  :label="clipAudioPlaying ? 'Stop' : 'Play'"
+                  @click="toggleClipGeneratedAudio"
+                />
+                <span class="text-caption text-grey">TTS file for this timeline clip</span>
+              </div>
+            </q-item-section>
+          </q-item>
+        </template>
       </q-list>
+      <audio
+        ref="clipPreviewAudio"
+        class="hidden"
+        @ended="clipAudioPlaying = false"
+      />
     </div>
 
     <!-- Character Properties -->
@@ -337,7 +362,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useVideoProjectStore, useVideoWorkspaceStore, useVideoJobsStore } from '../stores';
 import { useVideoCompanionStore } from '../stores/videoCompanion';
 import type { GenerationMode, TimelineClip, GenerationSpec } from '../types';
@@ -348,6 +373,42 @@ const jobsStore = useVideoJobsStore();
 const companion = useVideoCompanionStore();
 
 const keyframeInput = ref<HTMLInputElement | null>(null);
+const clipPreviewAudio = ref<HTMLAudioElement | null>(null);
+const clipAudioPlaying = ref(false);
+
+watch(
+  () => workspace.selectedClipId,
+  () => {
+    clipAudioPlaying.value = false;
+    const el = clipPreviewAudio.value;
+    if (el) {
+      el.pause();
+      el.currentTime = 0;
+    }
+  },
+);
+
+function toggleClipGeneratedAudio(): void {
+  const clip = workspace.selectedClip;
+  if (!clip?.audio_artifact_path || !projectStore.project || !clipPreviewAudio.value) return;
+
+  if (clipAudioPlaying.value) {
+    clipPreviewAudio.value.pause();
+    clipPreviewAudio.value.currentTime = 0;
+    clipAudioPlaying.value = false;
+    return;
+  }
+
+  clipPreviewAudio.value.src = getAssetUrl(clip.audio_artifact_path);
+  void clipPreviewAudio.value.play().then(
+    () => {
+      clipAudioPlaying.value = true;
+    },
+    () => {
+      clipAudioPlaying.value = false;
+    },
+  );
+}
 
 const generationModes = [
   { label: 'Prompt Only (Slideshow)', value: 'prompt_only' },

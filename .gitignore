@@ -53,3 +53,5 @@ server/bin
 # Temporary files
 tmp/
 nuitka-crash-report.xml
+
+debug-*.log

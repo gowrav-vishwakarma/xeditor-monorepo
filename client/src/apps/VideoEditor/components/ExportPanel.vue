@@ -186,7 +186,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { useVideoProjectStore, useVideoJobsStore } from '../stores';
-import { isClipAudioStale, isClipVideoStale } from '../types';
+import { isTimelineClipStaleWarning } from '../types';
 import type { TrackType } from '../types';
 
 const projectStore = useVideoProjectStore();
@@ -258,8 +258,7 @@ const pendingClips = computed(
 const staleClips = computed(
   () =>
     timeline.value.clips.filter(
-      (c) =>
-        c.status === 'done' && (isClipAudioStale(c) || isClipVideoStale(c)),
+      (c) => c.status === 'done' && isTimelineClipStaleWarning(c),
     ).length,
 );
 
@@ -308,10 +307,7 @@ async function exportVideo(): Promise<void> {
 
 async function regenerateStale(): Promise<void> {
   const staleClipIds = timeline.value.clips
-    .filter(
-      (c) =>
-        c.status === 'done' && (isClipAudioStale(c) || isClipVideoStale(c)),
-    )
+    .filter((c) => c.status === 'done' && isTimelineClipStaleWarning(c))
     .map((c) => c.id);
 
   if (staleClipIds.length > 0) {

@@ -85,7 +85,11 @@
               </span>
             </div>
             <div v-if="isClipStale(clip)" class="stale-indicator">
-              <q-icon name="warning" color="warning" size="xs" />
+              <q-icon name="warning" color="warning" size="xs">
+                <q-tooltip :delay="300">
+                  Script or settings changed since last generation — run Generate Audio / Video again to refresh.
+                </q-tooltip>
+              </q-icon>
             </div>
             <!-- Volume indicator for audio clips -->
             <div v-if="clip.volume !== undefined && clip.volume < 1" class="volume-indicator">
@@ -159,7 +163,7 @@
 import { ref, computed } from 'vue';
 import { useVideoProjectStore, useVideoJobsStore, useVideoWorkspaceStore } from '../stores';
 import type { TimelineClip, TimelineTrack, TrackType } from '../types';
-import { isClipAudioStale, isClipVideoStale } from '../types';
+import { isTimelineClipStaleWarning } from '../types';
 
 const projectStore = useVideoProjectStore();
 const jobsStore = useVideoJobsStore();
@@ -235,7 +239,7 @@ function getScriptTextForClip(clip: TimelineClip): string {
 }
 
 function isClipStale(clip: TimelineClip): boolean {
-  return isClipAudioStale(clip) || isClipVideoStale(clip);
+  return isTimelineClipStaleWarning(clip);
 }
 
 function selectClip(clipId: string): void {

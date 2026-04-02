@@ -805,11 +805,31 @@ export function isClipAudioStale(clip: TimelineClip): boolean {
 export function isClipVideoStale(clip: TimelineClip): boolean {
   const genAt = Math.max(clip.video_generated_at ?? 0, clip.av_generated_at ?? 0);
   if (genAt === 0) return true;
-  if (isClipAudioStale(clip)) return true;
+  const clipCarriesGeneratedAudio =
+    Boolean(clip.audio_artifact_path?.trim()) || (clip.av_generated_at ?? 0) > 0;
+  if (clipCarriesGeneratedAudio && isClipAudioStale(clip)) return true;
   return (
     Math.max(clip.keyframe_edited_at ?? 0, clip.style_edited_at ?? 0, clip.prompt_edited_at ?? 0) >
     genAt
   );
+}
+
+/**
+ * Timeline warning badge: dialog/music/sfx clips only use audio staleness.
+ * Video clips use video staleness (without treating "no video on audio track" as stale).
+ */
+export function isTimelineClipStaleWarning(clip: TimelineClip): boolean {
+  if (
+    clip.track_id === 'audio_dialog' ||
+    clip.track_id === 'audio_music' ||
+    clip.track_id === 'audio_sfx'
+  ) {
+    return isClipAudioStale(clip);
+  }
+  if (clip.track_id === 'video_main' || clip.track_id.startsWith('video')) {
+    return isClipVideoStale(clip);
+  }
+  return isClipAudioStale(clip) || isClipVideoStale(clip);
 }
 
 /**
